@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "intraday-power-quant"
+version = "0.1.0"
+description = "Day-Ahead Power Trader Project: transfer-learning 15-minute power-price forecasting and flexibility simulation."
+requires-python = ">=3.10"
+dependencies = [
+  "pandas>=2.2",
+  "numpy>=1.26",
+  "openpyxl>=3.1",
+  "scikit-learn>=1.5",
+  "xgboost>=2.1",
+  "lightgbm>=4.5",
+  "catboost>=1.2",
+  "matplotlib>=3.9",
+]
+
+[project.optional-dependencies]
+dashboard = ["streamlit>=1.37", "plotly>=5.23"]
+dev = ["pytest>=8.0", "ruff>=0.6"]
+
+[project.scripts]
+intraday-power-quant = "intraday_power_quant.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

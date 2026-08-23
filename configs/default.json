@@ -1,0 +1,91 @@
+{
+  "project_name": "Day-Ahead Power Trader Project",
+  "data_dir": "data/raw",
+  "reference_results_dir": "outputs",
+  "output_dir": "outputs/model_run",
+  "hourly_candidates": [
+    "final_day_ahead_safe_modeling_dataset_hourly.csv",
+    "final_day_ahead_safe_modeling_dataset.csv",
+    "final_day_ahead_safe_modeling_dataset.xlsx"
+  ],
+  "min15_candidates": [
+    "final_15min_day_ahead_safe_modeling_dataset.csv",
+    "final_15min_day_ahead_safe_modeling_dataset.xlsx"
+  ],
+  "target": "price_DK1",
+  "time_col": "HourUTC",
+  "transfer_start": "2025-10-01 00:00:00",
+  "split_ratio": 0.85,
+  "test_split_method": "ratio",
+  "test_period_days": 30,
+  "n_splits": 5,
+  "use_hourly_baseline_as_residual_feature": true,
+  "champion_prediction_column": "TL_Residual_Average",
+  "battery": {
+    "capacity_mwh": 100.0,
+    "power_mw": 25.0,
+    "initial_soc_mwh": 50.0,
+    "charge_efficiency": 0.95,
+    "discharge_efficiency": 0.95,
+    "low_quantile": 0.25,
+    "high_quantile": 0.75,
+    "fee_per_mwh": 0.0,
+    "max_daily_loss": null
+  },
+  "weekly_band": {
+    "window_days": 7.0,
+    "band": 20.0,
+    "min_history_days": 1.0
+  },
+  "forecast_edge": {
+    "threshold": 5.0,
+    "reference_col": "Hourly_Baseline"
+  },
+  "volatility_filter": {
+    "average_window_days": 7.0,
+    "volatility_window_days": 7.0,
+    "min_volatility": 30.0,
+    "price_band": 0.0,
+    "min_history_days": 1.0
+  },
+  "mean_reversion": {
+    "window_days": 7.0,
+    "entry_z": 1.0,
+    "min_history_days": 1.0
+  },
+  "momentum": {
+    "lookback_hours": 6.0,
+    "threshold": 5.0,
+    "smoothing_hours": 1.0
+  },
+  "momentum_spread": {
+    "low_quantile": 0.25,
+    "high_quantile": 0.75,
+    "rank_mode": "percentile",
+    "charge_rank": 24,
+    "discharge_rank": 73,
+    "min_daily_spread": 20.0,
+    "lookback_hours": 6.0,
+    "momentum_threshold": 5.0,
+    "smoothing_hours": 1.0
+  },
+  "channel_breakout": {
+    "window_days": 3.0,
+    "buffer": 0.0,
+    "min_history_days": 1.0
+  },
+  "daily_spread": {
+    "low_quantile": 0.25,
+    "high_quantile": 0.75,
+    "rank_mode": "percentile",
+    "charge_rank": 24,
+    "discharge_rank": 73,
+    "min_daily_spread": 0.0
+  },
+  "ensemble_agreement": {
+    "low_quantile": 0.25,
+    "high_quantile": 0.75,
+    "min_agreement": 0.6,
+    "max_model_spread": null
+  }
+}
