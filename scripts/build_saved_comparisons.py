@@ -37,7 +37,7 @@ def build_snapshot(trading_setup: str) -> dict[str, object]:
         StrategyComparisonRequest(
             forecast_col="Prediction",
             optimize=True,
-            test_days=6,
+            test_days=10,
             trading_setup=trading_setup,
             battery=DEFAULT_BATTERY,
             prop=DEFAULT_PROP,

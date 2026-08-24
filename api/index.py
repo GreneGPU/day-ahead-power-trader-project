@@ -125,7 +125,7 @@ class StrategyComparisonRequest(BaseModel):
     strategy: str | None = None
     days: int | None = Field(default=None, ge=1, le=90)
     optimize: bool = False
-    test_days: int = Field(default=6, ge=2, le=30)
+    test_days: int = Field(default=10, ge=2, le=30)
     battery: dict[str, Any] = Field(default_factory=dict)
     trading_setup: str = "battery"
     prop: dict[str, Any] = Field(default_factory=dict)

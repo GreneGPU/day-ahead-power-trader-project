@@ -13,7 +13,7 @@ The live dashboard offers two accounting setups. `Physical battery` defaults to 
 
 The prop setup is deliberately labeled as a synthetic research proxy. The thesis dataset does not contain historical financial-contract entry quotes, bid/ask spreads, margin, collateral, liquidity, or imbalance settlement, so its PnL is not presented as executable Nord Pool spot arbitrage.
 
-Its default evaluation mode reserves the final six complete DK1 calendar days as a chronological holdout: every strategy searches its parameter grid for the highest net cashflow on all earlier available observations, then the dashboard ranks strategies, calculates daily Sharpe, and shows trade logs using only those six unseen days. A fixed-default mode remains available for comparison.
+Its default evaluation mode reserves the final ten complete DK1 calendar days as a chronological holdout: every strategy searches its parameter grid for the highest net cashflow on all earlier available observations, then the dashboard ranks strategies, calculates daily Sharpe, and shows trade logs using only those ten unseen days. A fixed-default mode remains available for comparison.
 
 This repo turns the thesis notebook into a maintainable project:
 

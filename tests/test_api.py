@@ -205,6 +205,8 @@ def test_saved_comparisons_are_available_without_recalculation() -> None:
         payload = response.json()
         assert payload["saved_result"] is True
         assert payload["trading_setup"] == setup
+        assert payload["evaluation"]["test_days"] == 10
+        assert payload["evaluation"]["daily_observations"] == 10
         assert len(payload["strategies"]) == expected_count
         assert set(payload["strategy_series"]) == {
             row["Strategy"] for row in payload["strategies"]
