@@ -11,7 +11,6 @@ from typing import Any
 
 import pandas as pd
 from fastapi import FastAPI, HTTPException
-from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 
@@ -676,6 +675,3 @@ def simulate(payload: SimulationRequest) -> dict[str, Any]:
     if payload.include_intervals:
         response["intervals"] = _json_records(intervals)
     return response
-
-
-app.mount("/", StaticFiles(directory=PROJECT_ROOT / "public", html=True), name="dashboard")
