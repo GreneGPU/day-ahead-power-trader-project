@@ -167,7 +167,7 @@
 
   <section class="grid">
     <article class="card">
-      <div class="card-head"><div><h2 id="priceChartTitle">DK1 day-ahead price vs prediction</h2><p id="priceSubtitle">Saved 15-minute test forecast</p></div><div class="legend"><span class="actual">Day-ahead</span><span class="forecast">Prediction</span><span class="imbalance" id="imbalanceLegend" hidden>Imbalance</span><span class="charge" id="buyLegend">Charge</span><span class="discharge" id="sellLegend">Discharge</span></div></div>
+      <div class="card-head"><div><h2 id="priceChartTitle">DK1 day-ahead price vs prediction</h2><p id="priceSubtitle">Saved 15-minute test forecast</p></div><div class="legend"><span class="actual">Day-ahead</span><span class="forecast" id="forecastLegend">Prediction</span><span class="imbalance" id="imbalanceLegend" hidden>Imbalance</span><span class="charge" id="buyLegend">Charge</span><span class="discharge" id="sellLegend">Discharge</span></div></div>
       <canvas id="priceChart"></canvas>
     </article>
     <article class="card">
@@ -282,7 +282,7 @@ function markDirty(){
 function updateSetupUI(){
   document.querySelectorAll('[data-trading-setup]').forEach(button=>{const active=button.dataset.tradingSetup===state.tradingSetup;button.classList.toggle('active',active);button.setAttribute('aria-pressed',String(active))});
   document.querySelectorAll('[data-setup-control]').forEach(control=>{control.hidden=!control.dataset.setupControl.split(' ').includes(state.tradingSetup)});
-  $('#batteryNote').hidden=state.tradingSetup!=='battery'; $('#propNote').hidden=!isProp(); $('#imbalanceNote').hidden=!isImbalance(); $('#imbalanceLegend').hidden=!isImbalance();
+  $('#batteryNote').hidden=state.tradingSetup!=='battery'; $('#propNote').hidden=!isProp(); $('#imbalanceNote').hidden=!isImbalance(); $('#forecastLegend').hidden=isImbalance(); $('#imbalanceLegend').hidden=!isImbalance();
   $('#priceChartTitle').textContent=isImbalance()?'DK1 day-ahead vs imbalance price':'DK1 day-ahead price vs prediction';
   $('#pageLede').textContent=isImbalance()?'Compare forecast-driven signals against realized DK1 imbalance-minus-day-ahead spreads with transparent costs and loss limits.':isProp()?'Compare forecast-driven long/short signals using transparent synthetic mark-to-market accounting, capital limits and trading costs.':'Compare forecast-driven battery strategies across the saved 15-minute test predictions. Training stays offline; trading prices are converted to DKK and include battery losses and editable market and grid fees.';
   $('#rankingSubtitle').textContent=isImbalance()?'Same forecast signals, position size, costs, and realized imbalance spreads':isProp()?'Same forecast, synthetic position size, costs, and realized price moves':'Same forecast, battery, and realized DKK prices';
