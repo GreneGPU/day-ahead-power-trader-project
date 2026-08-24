@@ -285,9 +285,9 @@ function updateSetupUI(){
   document.querySelectorAll('[data-trading-setup]').forEach(button=>{const active=button.dataset.tradingSetup===visibleSetup;button.classList.toggle('active',active);button.setAttribute('aria-pressed',String(active))});
   document.querySelectorAll('[data-setup-control]').forEach(control=>{control.hidden=!control.dataset.setupControl.split(' ').includes(state.tradingSetup)});
   if(isDirectional())$('#propSettlement').value=isImbalance()?'imbalance':'prop';
-  $('#batteryNote').hidden=state.tradingSetup!=='battery'; $('#propNote').hidden=!isProp(); $('#imbalanceNote').hidden=!isImbalance(); $('#forecastLegend').hidden=isImbalance(); $('#imbalanceLegend').hidden=!isImbalance();
-  $('#priceChartTitle').textContent=isImbalance()?'Day-ahead entry vs imbalance settlement':'DK1 day-ahead price vs prediction';
-  $('#pageLede').textContent=isImbalance()?'Test the fallback settlement when forecast-driven day-ahead prop positions remain open into delivery.':isProp()?'Compare forecast-driven long/short signals using a synthetic pre-delivery close proxy, capital limits, and trading costs.':'Compare forecast-driven battery strategies across the saved 15-minute test predictions. Training stays offline; trading prices are converted to DKK and include battery losses and editable market and grid fees.';
+  $('#batteryNote').hidden=state.tradingSetup!=='battery'; $('#propNote').hidden=!isProp(); $('#imbalanceNote').hidden=!isImbalance(); $('#forecastLegend').hidden=false; $('#imbalanceLegend').hidden=!isDirectional();
+  $('#priceChartTitle').textContent=isDirectional()?'Day-ahead, forecast, and imbalance prices':'DK1 day-ahead price vs prediction';
+  $('#pageLede').textContent=isImbalance()?'Test the fallback settlement when forecast-driven day-ahead prop positions remain open into delivery.':isProp()?'Compare forecast-driven long/short signals using a synthetic pre-delivery close proxy, capital limits, and trading costs.':'Compare forecast-driven battery strategies using the original pre-settlement thesis calculation, including battery losses and editable market and grid fees.';
   $('#rankingSubtitle').textContent=isImbalance()?'Unclosed day-ahead positions settled at realized DK1 imbalance prices':isProp()?'Same forecast, synthetic position size, costs, and realized price moves':'Same forecast, battery, and realized DKK prices';
   $('#buyLegend').textContent=isImbalance()?'Long unclosed':isProp()?'Long':'Charge'; $('#sellLegend').textContent=isImbalance()?'Short unclosed':isProp()?'Short':'Discharge';
   $('#strategyGuideIntro').textContent=isImbalance()?'Buy/charge signals create long day-ahead positions and sell/discharge signals create short positions. This scenario assumes they remain unclosed into delivery; imbalance prices settle PnL and are never signal inputs.':isProp()?'Buy/charge signals become long positions and sell/discharge signals become short positions for the next realized DK1 price move, approximating a close before delivery.':'Charging means buying and storing electricity; discharging means selling it. Predictions choose the action, while realized DKK prices determine the displayed cashflow.';
@@ -327,9 +327,11 @@ function drawLineChart(canvas,rows,series){
 }
 
 function renderPrice(){
-  const rows=state.comparison?.selected_strategy_series||[];
+  const rows=(state.comparison?.selected_strategy_series||[]).map(row=>({...row}));
   const names=actionNames();
-  const priceSeries=isImbalance()?[{key:'Actual_Price',color:colors.actual,width:1.6},{key:'Imbalance_Price_DKK',color:colors.imbalance,width:1.7}]:[{key:'Actual_Price',color:colors.actual,width:1.6},{key:'Forecast_Price',color:colors.forecast,width:1.8}];
+  if(isDirectional()&&state.results?.prices){const imbalanceByTime=new Map(state.results.prices.map(row=>[new Date(row.HourUTC).getTime(),row.Imbalance_Price_DKK]));rows.forEach(row=>{row.Imbalance_Price_DKK=imbalanceByTime.get(new Date(row.HourUTC).getTime())})}
+  const priceSeries=[{key:'Actual_Price',color:colors.actual,width:1.6},{key:'Forecast_Price',color:colors.forecast,width:1.8}];
+  if(isDirectional())priceSeries.push({key:'Imbalance_Price_DKK',color:colors.imbalance,width:1.7});
   priceSeries.push({type:'markers',key:'Actual_Price',action:names.buy,shape:'down',color:colors.charge},{type:'markers',key:'Actual_Price',action:names.sell,shape:'up',color:colors.discharge});
   drawLineChart($('#priceChart'),rows,priceSeries);
   if(rows.length){const start=new Date(rows[0].HourUTC).toLocaleDateString('en-DK');const end=new Date(rows.at(-1).HourUTC).toLocaleDateString('en-DK');const buys=rows.filter(row=>row.Action===names.buy).length,sells=rows.filter(row=>row.Action===names.sell).length;$('#priceSubtitle').textContent=`${rows.length.toLocaleString()} intervals · ${buys} ${names.buyLabel.toLowerCase()} · ${sells} ${names.sellLabel.toLowerCase()} · ${start} to ${end}`}
@@ -400,7 +402,7 @@ function renderComparison(){
 function renderSourceNote(){
   if(!state.results)return;
   const data=state.results.dataset;
-  $('#sourceNote').textContent=`Source: ${data.source_forecast_file} · ${data.rows.toLocaleString()} saved prediction intervals · trading prices converted from EUR to DKK with interval exchange rates · ${isImbalance()?'Unclosed day-ahead positions settled using Energinet DK1 imbalance prices; requires physical flexibility or a BRP arrangement.':isProp()?'Synthetic pre-delivery close accounting; not an executable financial-contract backtest.':'Physical battery strategy calculations use realized prices.'} Research tooling only.`;
+  $('#sourceNote').textContent=`Source: ${data.source_forecast_file} · ${data.rows.toLocaleString()} saved prediction intervals · ${isDirectional()?'Prop prices converted from EUR to DKK with interval exchange rates.':'Battery results use the original pre-settlement thesis price basis.'} ${isImbalance()?'Unclosed day-ahead positions settle using Energinet DK1 imbalance prices; requires physical flexibility or a BRP arrangement.':isProp()?'Synthetic pre-delivery close accounting; not an executable financial-contract backtest.':'Physical battery calculations are isolated from imbalance settlement.'} Research tooling only.`;
 }
 
 function readyStatus(source='calculated'){

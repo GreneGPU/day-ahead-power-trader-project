@@ -167,8 +167,8 @@ def _load_deployment_results() -> tuple[pd.DataFrame, list[dict[str, Any]], dict
         raise ValueError("Imbalance prices do not cover all deployment predictions.")
     for column in ["Actual_Price", *FORECAST_COLUMNS]:
         forecasts[f"{column}_EUR"] = forecasts[column]
-        forecasts[column] = forecasts[column] * forecasts["FX_DKK_per_EUR"]
-    forecasts["Actual_Price"] = forecasts["Spot_Price_DKK"]
+        forecasts[f"{column}_DKK"] = forecasts[column] * forecasts["FX_DKK_per_EUR"]
+    forecasts["Actual_Price_DKK"] = forecasts["Spot_Price_DKK"]
     return forecasts.sort_values("HourUTC").reset_index(drop=True), metrics, manifest
 
 
@@ -261,6 +261,7 @@ def results(days: int | None = None) -> dict[str, Any]:
     return {
         "dataset": {
             **manifest,
+            "price_currency": "EUR/MWh for battery; DKK/MWh for Prop",
             "selected_rows": len(selected),
             "selected_start": selected["HourUTC"].min().isoformat(),
             "selected_end": selected["HourUTC"].max().isoformat(),
@@ -275,6 +276,10 @@ def results(days: int | None = None) -> dict[str, Any]:
                     "Prediction",
                     "Hourly_Baseline",
                     "Direct_15min_Prediction",
+                    "Actual_Price_DKK",
+                    "Prediction_DKK",
+                    "Hourly_Baseline_DKK",
+                    "Direct_15min_Prediction_DKK",
                     "Imbalance_Price_DKK",
                     "Dominating_Direction",
                 ]
@@ -321,6 +326,9 @@ def compare_strategies(payload: StrategyComparisonRequest) -> dict[str, Any]:
             detail=f"Strategy is battery-only and unavailable in {trading_setup} mode: {payload.strategy}",
         )
     forecasts, metrics, manifest = _load_deployment_results()
+    if is_directional:
+        for column in ["Actual_Price", *FORECAST_COLUMNS]:
+            forecasts[column] = forecasts[f"{column}_DKK"]
     history = _select_window(forecasts, payload.days)
     selected = history
     train: pd.DataFrame | None = None
@@ -629,6 +637,9 @@ def compare_strategies(payload: StrategyComparisonRequest) -> dict[str, Any]:
         {
             "dataset": {
                 **manifest,
+                "trading_price_currency": (
+                    "DKK/MWh" if is_directional else "Legacy thesis EUR/MWh basis"
+                ),
                 "history_rows": len(history),
                 "history_start": history["HourUTC"].min().isoformat(),
                 "history_end": history["HourUTC"].max().isoformat(),

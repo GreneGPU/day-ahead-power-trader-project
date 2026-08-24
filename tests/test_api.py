@@ -60,9 +60,10 @@ def test_deployment_results_use_real_predictions() -> None:
     assert payload["dataset"]["rows"] == 2116
     assert len(payload["prices"]) == 2116
     assert len(payload["model_metrics"]) == 3
-    assert math.isclose(payload["prices"][0]["Actual_Price"], 792.200382, abs_tol=1e-6)
+    assert payload["prices"][0]["Actual_Price"] == 106.029999
+    assert math.isclose(payload["prices"][0]["Actual_Price_DKK"], 792.200382, abs_tol=1e-6)
     assert payload["prices"][0]["Imbalance_Price_DKK"] == 1307.51
-    assert payload["dataset"]["price_currency"] == "DKK/MWh"
+    assert payload["dataset"]["price_currency"] == "EUR/MWh for battery; DKK/MWh for Prop"
 
 
 def test_strategy_comparison_uses_all_strategy_families() -> None:
@@ -244,6 +245,8 @@ def test_saved_comparisons_are_available_without_recalculation() -> None:
         assert payload["evaluation"]["test_days"] == 10
         assert payload["evaluation"]["daily_observations"] == 10
         assert len(payload["strategies"]) == expected_count
+        if setup == "battery":
+            assert math.isclose(payload["strategies"][0]["Cashflow"], 4572.405693674425)
         assert set(payload["strategy_series"]) == {
             row["Strategy"] for row in payload["strategies"]
         }
