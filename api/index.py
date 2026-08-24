@@ -20,6 +20,10 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from intraday_power_quant.optimization import optimize_strategy_suite, simulate_strategy_from_settings
+from intraday_power_quant.imbalance_trading import (
+    simulate_imbalance_perfect_foresight,
+    simulate_imbalance_spread_positions,
+)
 from intraday_power_quant.prop_trading import (
     PropConfig,
     simulate_prop_perfect_foresight,
@@ -51,7 +55,7 @@ from intraday_power_quant.trading import (
 
 app = FastAPI(
     title="Day-Ahead Power Trading API",
-    description="Vercel API for forecast-driven battery and prop-proxy strategy simulations.",
+    description="Vercel API for battery, directional, and imbalance-spread strategy simulations.",
     version="0.1.0",
     docs_url="/api/docs",
     openapi_url="/api/openapi.json",
@@ -104,6 +108,7 @@ PROP_STRATEGIES = {
 SAVED_COMPARISON_FILES = {
     "battery": "default_battery_comparison.json.gz",
     "prop": "default_prop_comparison.json.gz",
+    "imbalance": "default_imbalance_comparison.json.gz",
 }
 
 
@@ -155,6 +160,15 @@ def _load_deployment_results() -> tuple[pd.DataFrame, list[dict[str, Any]], dict
     metrics = json.loads((data_dir / "model_metrics.json").read_text(encoding="utf-8"))
     manifest = json.loads((data_dir / "manifest.json").read_text(encoding="utf-8"))
     forecasts["HourUTC"] = pd.to_datetime(forecasts["HourUTC"], utc=True)
+    imbalance = pd.read_csv(data_dir / "imbalance_prices.csv.gz", parse_dates=["HourUTC"])
+    imbalance["HourUTC"] = pd.to_datetime(imbalance["HourUTC"], utc=True)
+    forecasts = forecasts.merge(imbalance, on="HourUTC", how="left", validate="one_to_one")
+    if forecasts["Imbalance_Price_DKK"].isna().any():
+        raise ValueError("Imbalance prices do not cover all deployment predictions.")
+    for column in ["Actual_Price", *FORECAST_COLUMNS]:
+        forecasts[f"{column}_EUR"] = forecasts[column]
+        forecasts[column] = forecasts[column] * forecasts["FX_DKK_per_EUR"]
+    forecasts["Actual_Price"] = forecasts["Spot_Price_DKK"]
     return forecasts.sort_values("HourUTC").reset_index(drop=True), metrics, manifest
 
 
@@ -261,13 +275,15 @@ def results(days: int | None = None) -> dict[str, Any]:
                     "Prediction",
                     "Hourly_Baseline",
                     "Direct_15min_Prediction",
+                    "Imbalance_Price_DKK",
+                    "Dominating_Direction",
                 ]
             ]
         ),
     }
 
 
-@lru_cache(maxsize=2)
+@lru_cache(maxsize=3)
 def _load_saved_comparison(trading_setup: str) -> dict[str, Any]:
     path = PROJECT_ROOT / "deployment_data" / SAVED_COMPARISON_FILES[trading_setup]
     if not path.exists():
@@ -294,13 +310,15 @@ def compare_strategies(payload: StrategyComparisonRequest) -> dict[str, Any]:
     if payload.strategy is not None and payload.strategy not in STRATEGY_DESCRIPTIONS:
         raise HTTPException(status_code=422, detail=f"Unknown strategy: {payload.strategy}")
     trading_setup = payload.trading_setup.lower().replace("-", "_")
-    if trading_setup not in {"battery", "prop"}:
+    if trading_setup not in {"battery", "prop", "imbalance"}:
         raise HTTPException(status_code=422, detail=f"Unknown trading setup: {payload.trading_setup}")
     is_prop = trading_setup == "prop"
-    if is_prop and payload.strategy is not None and payload.strategy not in PROP_STRATEGIES:
+    is_imbalance = trading_setup == "imbalance"
+    is_directional = is_prop or is_imbalance
+    if is_directional and payload.strategy is not None and payload.strategy not in PROP_STRATEGIES:
         raise HTTPException(
             status_code=422,
-            detail=f"Strategy is battery-only and unavailable in prop mode: {payload.strategy}",
+            detail=f"Strategy is battery-only and unavailable in {trading_setup} mode: {payload.strategy}",
         )
     forecasts, metrics, manifest = _load_deployment_results()
     history = _select_window(forecasts, payload.days)
@@ -328,8 +346,49 @@ def compare_strategies(payload: StrategyComparisonRequest) -> dict[str, Any]:
         ) -> tuple[pd.DataFrame, dict[str, float]]:
             return simulate_prop_positions(simulation, no_fee_prop)
 
-        result_transform = prop_transform if is_prop else None
-        no_fee_result_transform = no_fee_prop_transform if is_prop else None
+        imbalance_reference = forecasts[
+            ["HourUTC", "Imbalance_Price_DKK", "Dominating_Direction"]
+        ]
+
+        def attach_imbalance_settlement(simulation: pd.DataFrame) -> pd.DataFrame:
+            missing = [
+                column
+                for column in ("Imbalance_Price_DKK", "Dominating_Direction")
+                if column not in simulation.columns
+            ]
+            if not missing:
+                return simulation
+            return simulation.merge(
+                imbalance_reference[["HourUTC", *missing]],
+                on="HourUTC",
+                how="left",
+                validate="one_to_one",
+            )
+
+        def imbalance_transform(
+            simulation: pd.DataFrame, _summary: dict[str, float]
+        ) -> tuple[pd.DataFrame, dict[str, float]]:
+            return simulate_imbalance_spread_positions(
+                attach_imbalance_settlement(simulation), prop
+            )
+
+        def no_fee_imbalance_transform(
+            simulation: pd.DataFrame, _summary: dict[str, float]
+        ) -> tuple[pd.DataFrame, dict[str, float]]:
+            return simulate_imbalance_spread_positions(
+                attach_imbalance_settlement(simulation), no_fee_prop
+            )
+
+        result_transform = (
+            prop_transform if is_prop else imbalance_transform if is_imbalance else None
+        )
+        no_fee_result_transform = (
+            no_fee_prop_transform
+            if is_prop
+            else no_fee_imbalance_transform
+            if is_imbalance
+            else None
+        )
         if payload.optimize:
             train, selected = _split_complete_day_holdout(history, payload.test_days)
             optimized = optimize_strategy_suite(
@@ -348,12 +407,12 @@ def compare_strategies(payload: StrategyComparisonRequest) -> dict[str, Any]:
             )
             no_fee_potential = optimize_strategy_suite(
                 selected,
-                battery_config=battery if is_prop else no_fee_battery,
+                battery_config=battery if is_directional else no_fee_battery,
                 ranking_metric="Cashflow",
                 forecast_col=payload.forecast_col,
                 result_transform=no_fee_result_transform,
             )
-            if is_prop:
+            if is_directional:
                 optimized = optimized.loc[optimized["Strategy"].isin(PROP_STRATEGIES)].reset_index(drop=True)
                 test_potential = test_potential.loc[
                     test_potential["Strategy"].isin(PROP_STRATEGIES)
@@ -413,7 +472,7 @@ def compare_strategies(payload: StrategyComparisonRequest) -> dict[str, Any]:
             )
             raw_no_fee_suite = (
                 raw_suite
-                if is_prop
+                if is_directional
                 else run_strategy_suite(
                     selected,
                     battery_config=no_fee_battery,
@@ -423,14 +482,14 @@ def compare_strategies(payload: StrategyComparisonRequest) -> dict[str, Any]:
             suite = {
                 name: result_transform(*result) if result_transform is not None else result
                 for name, result in raw_suite.items()
-                if not is_prop or name in PROP_STRATEGIES
+                if not is_directional or name in PROP_STRATEGIES
             }
             no_fee_suite = {
                 name: no_fee_result_transform(*result)
                 if no_fee_result_transform is not None
                 else result
                 for name, result in raw_no_fee_suite.items()
-                if not is_prop or name in PROP_STRATEGIES
+                if not is_directional or name in PROP_STRATEGIES
             }
             for name in suite:
                 settings = DEFAULT_SETTINGS[name]
@@ -466,6 +525,12 @@ def compare_strategies(payload: StrategyComparisonRequest) -> dict[str, Any]:
             description += (
                 " In the prop proxy, buy/charge signals map to long positions and "
                 "sell/discharge signals map to short positions for the next price move."
+            )
+        elif is_imbalance:
+            description += (
+                " In the imbalance proxy, buy/charge signals take the long side and "
+                "sell/discharge signals take the short side of the same-interval DK1 "
+                "imbalance-minus-day-ahead spread."
             )
         if name == "Ensemble agreement" and int(summary.get("model_count", 0)) == 1:
             description += (
@@ -511,6 +576,12 @@ def compare_strategies(payload: StrategyComparisonRequest) -> dict[str, Any]:
             config=prop,
             forecast_col=payload.forecast_col,
         )
+    elif is_imbalance:
+        oracle_simulation, oracle_summary = simulate_imbalance_perfect_foresight(
+            selected,
+            config=prop,
+            forecast_col=payload.forecast_col,
+        )
     else:
         oracle_simulation, oracle_summary = simulate_perfect_foresight_oracle(
             selected,
@@ -535,6 +606,10 @@ def compare_strategies(payload: StrategyComparisonRequest) -> dict[str, Any]:
         "Position",
         "Position_MWh",
         "Price_Change_DKK",
+        "Day_Ahead_Price_DKK",
+        "Imbalance_Price_DKK",
+        "Imbalance_Spread_DKK",
+        "Dominating_Direction",
         "Gross_Cashflow",
         "Transaction_Cost",
         "Equity_DKK",
@@ -590,6 +665,8 @@ def compare_strategies(payload: StrategyComparisonRequest) -> dict[str, Any]:
                 "label": (
                     "Perfect-foresight directional ceiling"
                     if is_prop
+                    else "Perfect-foresight imbalance-spread ceiling"
+                    if is_imbalance
                     else "Perfect-foresight DP ceiling"
                 ),
                 "Cashflow": float(oracle_summary["total_cashflow"]),
@@ -602,6 +679,9 @@ def compare_strategies(payload: StrategyComparisonRequest) -> dict[str, Any]:
                     "Selects the hindsight-optimal long/flat/short path directly from realized "
                     "price changes, including switching costs. It is not tradable."
                     if is_prop
+                    else "Selects the profitable side of each realized imbalance spread with "
+                    "costs included. It is a hindsight ceiling and not a tradable strategy."
+                    if is_imbalance
                     else "Optimizes directly on realized test prices. This is a hindsight opportunity "
                     "ceiling, not a tradable strategy or forecast result."
                 ),
@@ -624,12 +704,12 @@ def simulate(payload: SimulationRequest) -> dict[str, Any]:
     if payload.strategy not in STRATEGY_DESCRIPTIONS:
         raise HTTPException(status_code=422, detail=f"Unknown strategy: {payload.strategy}")
     trading_setup = payload.trading_setup.lower().replace("-", "_")
-    if trading_setup not in {"battery", "prop"}:
+    if trading_setup not in {"battery", "prop", "imbalance"}:
         raise HTTPException(status_code=422, detail=f"Unknown trading setup: {payload.trading_setup}")
-    if trading_setup == "prop" and payload.strategy not in PROP_STRATEGIES:
+    if trading_setup in {"prop", "imbalance"} and payload.strategy not in PROP_STRATEGIES:
         raise HTTPException(
             status_code=422,
-            detail=f"Strategy is battery-only and unavailable in prop mode: {payload.strategy}",
+            detail=f"Strategy is battery-only and unavailable in {trading_setup} mode: {payload.strategy}",
         )
 
     frame = pd.DataFrame.from_records(payload.records)
@@ -661,6 +741,13 @@ def simulate(payload: SimulationRequest) -> dict[str, Any]:
                 PropConfig(**payload.prop),
                 time_col=payload.time_col,
                 actual_col=payload.actual_col,
+            )
+        elif trading_setup == "imbalance":
+            intervals, summary = simulate_imbalance_spread_positions(
+                intervals,
+                PropConfig(**payload.prop),
+                time_col=payload.time_col,
+                day_ahead_col=payload.actual_col,
             )
     except (KeyError, TypeError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

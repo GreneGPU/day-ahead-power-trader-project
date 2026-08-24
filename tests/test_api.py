@@ -60,7 +60,9 @@ def test_deployment_results_use_real_predictions() -> None:
     assert payload["dataset"]["rows"] == 2116
     assert len(payload["prices"]) == 2116
     assert len(payload["model_metrics"]) == 3
-    assert payload["prices"][0]["Actual_Price"] == 106.029999
+    assert math.isclose(payload["prices"][0]["Actual_Price"], 792.200382, abs_tol=1e-6)
+    assert payload["prices"][0]["Imbalance_Price_DKK"] == 1307.51
+    assert payload["dataset"]["price_currency"] == "DKK/MWh"
 
 
 def test_strategy_comparison_uses_all_strategy_families() -> None:
@@ -198,8 +200,42 @@ def test_prop_comparison_rejects_battery_only_optimizer() -> None:
     assert "battery-only" in response.json()["detail"]
 
 
+def test_imbalance_comparison_returns_spread_accounting() -> None:
+    response = client.post(
+        "/api/compare",
+        json={
+            "forecast_col": "Prediction",
+            "strategy": "Daily spread rank",
+            "days": 7,
+            "trading_setup": "imbalance",
+            "prop": {
+                "initial_capital_dkk": 100_000,
+                "position_size_mwh": 10,
+                "transaction_cost_dkk_per_mwh": 0.41,
+                "max_daily_loss_dkk": 5_000,
+            },
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["trading_setup"] == "imbalance"
+    assert len(payload["strategies"]) == 12
+    assert payload["perfect_foresight_benchmark"]["label"] == (
+        "Perfect-foresight imbalance-spread ceiling"
+    )
+    selected = payload["selected_strategy_series"]
+    assert any(row["Action"] in {"long-spread", "short-spread"} for row in selected)
+    assert {
+        "Day_Ahead_Price_DKK",
+        "Imbalance_Price_DKK",
+        "Imbalance_Spread_DKK",
+        "Dominating_Direction",
+        "Transaction_Cost",
+    }.issubset(selected[0])
+
+
 def test_saved_comparisons_are_available_without_recalculation() -> None:
-    for setup, expected_count in (("battery", 16), ("prop", 12)):
+    for setup, expected_count in (("battery", 16), ("prop", 12), ("imbalance", 12)):
         response = client.get(f"/api/saved-comparison/{setup}")
         assert response.status_code == 200
         payload = response.json()

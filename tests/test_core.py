@@ -8,6 +8,10 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from intraday_power_quant.evaluation import calculate_metrics
+from intraday_power_quant.imbalance_trading import (
+    simulate_imbalance_perfect_foresight,
+    simulate_imbalance_spread_positions,
+)
 from intraday_power_quant.optimization import optimize_strategy_suite, run_strategy_parameter_sweep
 from intraday_power_quant.prop_trading import PropConfig, simulate_prop_positions
 from intraday_power_quant.research import (
@@ -101,6 +105,36 @@ def test_prop_proxy_maps_signals_to_positions_and_charges_switching_costs():
     assert math.isclose(summary["total_cashflow"], 48.0)
     assert math.isclose(summary["return_pct"], 4.8)
     assert simulation["Position"].iloc[-1] == 0
+
+
+def test_imbalance_proxy_settles_signals_against_realized_spread():
+    signals = pd.DataFrame(
+        {
+            "HourUTC": pd.date_range("2026-01-01", periods=3, freq="15min", tz="UTC"),
+            "Actual_Price": [100.0, 100.0, 100.0],
+            "Imbalance_Price_DKK": [120.0, 80.0, 105.0],
+            "Forecast_Price": [90.0, 110.0, 100.0],
+            "Signal_Action": ["charge", "discharge", "hold"],
+        }
+    )
+    config = PropConfig(
+        initial_capital_dkk=1_000.0,
+        position_size_mwh=2.0,
+        transaction_cost_dkk_per_mwh=1.0,
+    )
+    simulation, summary = simulate_imbalance_spread_positions(signals, config)
+    oracle, oracle_summary = simulate_imbalance_perfect_foresight(
+        signals.rename(columns={"Forecast_Price": "Prediction"}),
+        config,
+    )
+
+    assert simulation["Action"].tolist() == ["long-spread", "short-spread", "flat"]
+    assert simulation["Imbalance_Spread_DKK"].tolist() == [20.0, -20.0, 5.0]
+    assert math.isclose(summary["gross_cashflow"], 80.0)
+    assert math.isclose(summary["total_fee_cost"], 4.0)
+    assert math.isclose(summary["total_cashflow"], 76.0)
+    assert oracle_summary["total_cashflow"] >= summary["total_cashflow"]
+    assert set(oracle["Action"]) <= {"long-spread", "short-spread", "flat"}
 
 
 def test_battery_simulation_applies_round_trip_efficiency_and_directional_fees():

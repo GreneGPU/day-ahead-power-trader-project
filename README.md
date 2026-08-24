@@ -1,17 +1,19 @@
 # Day-Ahead Power Trading Project
 
-Transfer-learning 15-minute day-ahead electricity-price forecasting, physical battery optimization, and synthetic proprietary-trading research for DK1/DK2-style power markets.
+Transfer-learning 15-minute day-ahead electricity-price forecasting, physical battery optimization, synthetic directional research, and DK1 imbalance-spread analysis.
 
 Live dashboard: https://greneportfolio.vercel.app/
 
-The dashboard opens from precomputed default battery and prop snapshots, so visiting or refreshing the
+The dashboard opens from precomputed default battery, prop, and imbalance snapshots, so visiting or refreshing the
 site does not rerun the strategy grids. Changing controls keeps the displayed snapshot in place and marks
 the settings as pending; `Compare strategies` is the explicit recalculation action. Strategy selection is
 instant because each comparison response contains the plotted series for every available strategy.
 
-The live dashboard offers two accounting setups. `Physical battery` defaults to 90% round-trip efficiency and a 2026 DK1 distribution-connected fee assumption: 115.41 DKK/MWh while charging and 10.71 DKK/MWh while discharging. `Prop proxy` maps buy/charge signals to long positions and sell/discharge signals to short positions for the next observed DK1 price move, with editable capital, position size, switching cost, and daily loss limit.
+The live dashboard offers three accounting setups. `Physical battery` defaults to 90% round-trip efficiency and a 2026 DK1 distribution-connected fee assumption: 115.41 DKK/MWh while charging and 10.71 DKK/MWh while discharging. `Prop proxy` maps buy/charge signals to long positions and sell/discharge signals to short positions for the next observed DK1 price move. `Imbalance spread` applies the same forecast-only signals to the realized same-interval imbalance-minus-day-ahead spread. Both directional modes have editable capital, position size, transaction cost, and daily loss limit.
 
-The prop setup is deliberately labeled as a synthetic research proxy. The thesis dataset does not contain historical financial-contract entry quotes, bid/ask spreads, margin, collateral, liquidity, or imbalance settlement, so its PnL is not presented as executable Nord Pool spot arbitrage.
+The prop setup is deliberately labeled as a synthetic research proxy. The thesis dataset does not contain historical financial-contract entry quotes, bid/ask spreads, margin, collateral, or liquidity, so its PnL is not presented as executable Nord Pool spot arbitrage. The imbalance view uses historical Energinet DK1 settlement prices, but it is still a proxy: capturing this spread requires physical flexibility or a balance-responsible-party arrangement, and the calculation does not model activation, metering, collateral, or market impact.
+
+Trading prices and forecasts are converted from EUR/MWh to DKK/MWh with the interval exchange rates implied by matching Energinet EUR and DKK fields. The displayed model MAE and RMSE remain in the original EUR/MWh units used to train and evaluate the thesis models.
 
 Its default evaluation mode reserves the final ten complete DK1 calendar days as a chronological holdout: every strategy searches its parameter grid for the highest net cashflow on all earlier available observations, then the dashboard ranks strategies, calculates daily Sharpe, and shows trade logs using only those ten unseen days. A fixed-default mode remains available for comparison.
 
@@ -26,7 +28,8 @@ This repo turns the thesis notebook into a maintainable project:
 - model-ranking metrics, coverage checks, leakage warnings, and ablation entry point
 - forecast-driven battery arbitrage simulator
 - asset-free long/short research proxy with capital return, transaction costs, loss limits, and forced flat close
-- separate perfect-foresight benchmarks for battery dispatch and synthetic directional positions
+- imbalance-spread settlement proxy using aligned Energinet DK1 prices and forecast-only signals
+- separate perfect-foresight benchmarks for battery dispatch, synthetic directional positions, and imbalance spreads
 - selectable strategy suite with user-adjustable parameters
 - live strategy selection with per-interval charge/discharge logs and CSV export
 - DK1 actual-versus-prediction chart with charge and discharge execution markers
@@ -58,6 +61,7 @@ intraday-power-quant/
 |   |-- data.py
 |   |-- evaluation.py
 |   |-- experiments.py
+|   |-- imbalance_trading.py
 |   |-- models.py
 |   |-- optimization.py
 |   |-- plots.py
@@ -151,6 +155,15 @@ To refresh the default results bundled with the deployed dashboard after changin
 .venv\Scripts\python scripts\build_saved_comparisons.py
 ```
 
+To replace or extend the aligned Energinet DK1 imbalance extract, import it before rebuilding the snapshots:
+
+```powershell
+.venv\Scripts\python scripts\import_imbalance_prices.py "C:\path\to\ImbalancePrice.csv"
+.venv\Scripts\python scripts\build_saved_comparisons.py
+```
+
+The importer validates DK1 coverage, a complete 15-minute time grid, duplicate timestamps, missing values, EUR/DKK consistency, and exact timestamp alignment with the saved forecast dataset.
+
 ## Dashboard Options
 
 The static HTML dashboard needs no server and is the easiest artifact to share. A Streamlit app is also included for local exploration:
@@ -180,13 +193,13 @@ The Streamlit dashboard supports multiple dispatch strategies and day-ahead rese
 - `Wind signal`: uses only Energinet DK1 day-ahead wind level and ramp signals to choose actions.
 - `Wind-confirmed optimizer`: permits predicted-price optimizer actions only when day-ahead wind conditions confirm them.
 
-The deployed comparison reports setup-specific perfect-foresight benchmarks based on actual test prices:
-the battery view optimizes the realized dispatch path, while the prop view optimizes the realized
-long/flat/short path including switching costs. Both are labeled as hindsight opportunity ceilings and
-are not ranked as tradable strategies.
-For each strategy, the site also calculates a no-fee potential counterfactual by setting all modeled
-trading fees to zero while retaining battery efficiency and degradation costs. In optimized mode,
-both fee-adjusted and no-fee potential are re-optimized on the test period and labeled as hindsight-only.
+The deployed comparison reports setup-specific perfect-foresight benchmarks based on actual test prices.
+The battery view optimizes the realized dispatch path, the prop view optimizes the realized
+long/flat/short path including switching costs, and the imbalance view chooses the profitable side of
+each realized spread. All are labeled as hindsight opportunity ceilings and are not ranked as tradable
+strategies. For each strategy, the site also calculates a zero-cost counterfactual while retaining battery
+efficiency and degradation costs where applicable. In optimized mode, both cost-adjusted and zero-cost
+potential are re-optimized on the test period and labeled as hindsight-only.
 
 The `Quant research checks` panel adds:
 

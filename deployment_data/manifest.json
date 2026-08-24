@@ -18,5 +18,13 @@
     "Wind_Intraday_Revision_MW"
   ],
   "feature_source": "Energinet Forecasts_Hour, DK1",
-  "feature_source_url": "https://www.energidataservice.dk/tso-electricity/Forecasts_Hour"
+  "feature_source_url": "https://www.energidataservice.dk/tso-electricity/Forecasts_Hour",
+  "price_currency": "DKK/MWh",
+  "forecast_metric_currency": "EUR/MWh",
+  "price_conversion": "Per-interval EUR/DKK rates derived from matching Energinet EUR and DKK price fields",
+  "imbalance_source": "Energinet Data Service ImbalancePrice, DK1",
+  "imbalance_source_url": "https://www.energidataservice.dk/tso-electricity/ImbalancePrice",
+  "imbalance_rows": 2116,
+  "imbalance_start": "2026-02-10T22:00:00+00:00",
+  "imbalance_end": "2026-03-04T22:45:00+00:00"
 }
