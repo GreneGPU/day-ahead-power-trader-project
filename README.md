@@ -4,6 +4,11 @@ Transfer-learning 15-minute day-ahead electricity-price forecasting, physical ba
 
 Live dashboard: https://greneportfolio.vercel.app/
 
+The dashboard opens from precomputed default battery and prop snapshots, so visiting or refreshing the
+site does not rerun the strategy grids. Changing controls keeps the displayed snapshot in place and marks
+the settings as pending; `Compare strategies` is the explicit recalculation action. Strategy selection is
+instant because each comparison response contains the plotted series for every available strategy.
+
 The live dashboard offers two accounting setups. `Physical battery` defaults to 90% round-trip efficiency and a 2026 DK1 distribution-connected fee assumption: 115.41 DKK/MWh while charging and 10.71 DKK/MWh while discharging. `Prop proxy` maps buy/charge signals to long positions and sell/discharge signals to short positions for the next observed DK1 price move, with editable capital, position size, switching cost, and daily loss limit.
 
 The prop setup is deliberately labeled as a synthetic research proxy. The thesis dataset does not contain historical financial-contract entry quotes, bid/ask spreads, margin, collateral, liquidity, or imbalance settlement, so its PnL is not presented as executable Nord Pool spot arbitrage.
@@ -139,6 +144,12 @@ Outputs:
 
 - `reports/day_ahead_power_trader_project_dashboard.html`
 - `reports/day_ahead_power_trader_project_report.md`
+
+To refresh the default results bundled with the deployed dashboard after changing data or strategy code:
+
+```powershell
+.venv\Scripts\python scripts\build_saved_comparisons.py
+```
 
 ## Dashboard Options
 

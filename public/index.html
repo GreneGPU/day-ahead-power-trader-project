@@ -43,6 +43,8 @@
     .calculation-spinner { width:18px; height:18px; border:2px solid rgba(97,173,255,.22); border-top-color:var(--blue); border-radius:50%; animation:spin .8s linear infinite; }
     .calculation-state.ok { border-color:rgba(63,224,157,.34); }
     .calculation-state.ok .calculation-spinner { border-color:var(--green); animation:none; }
+    .calculation-state.dirty { border-color:rgba(255,181,95,.42); }
+    .calculation-state.dirty .calculation-spinner { border-color:var(--orange); animation:none; }
     .calculation-state.bad { border-color:rgba(255,107,122,.42); }
     .calculation-state.bad .calculation-spinner { border-color:var(--red); animation:none; }
     .calculation-elapsed { color:var(--muted); font-size:12px; font-variant-numeric:tabular-nums; }
@@ -149,8 +151,8 @@
   <div class="cost-note" id="propNote" hidden><strong>Synthetic directional research proxy:</strong> low-price signals become long and high-price signals become short for the next observed DK1 price change. Position changes incur the selected cost and the final position is closed. This is not executable Nord Pool spot arbitrage: no historical financial-contract quotes, bid/ask spread, margin, collateral, liquidity or imbalance settlement are available in the thesis dataset.</div>
   <div class="calculation-state" id="calculationState" role="status" aria-live="polite">
     <span class="calculation-spinner" aria-hidden="true"></span>
-    <div><strong id="statusText">Loading saved predictions…</strong><small id="statusDetail">Preparing strategy calculations.</small></div>
-    <span class="calculation-elapsed" id="calculationElapsed">0s</span>
+    <div><strong id="statusText">Loading saved results…</strong><small id="statusDetail">Reading the deployment snapshot. No optimization is running.</small></div>
+    <span class="calculation-elapsed" id="calculationElapsed">Saved</span>
   </div>
   <div class="optimization-note" id="optimizationNote">Preparing chronological train/test evaluation…</div>
 
@@ -218,7 +220,7 @@
 
 <script>
 const $ = selector => document.querySelector(selector);
-const state = { results:null, comparison:null, tradingSetup:'battery' };
+const state = { results:null, comparison:null, tradingSetup:'battery', dirty:false, savedComparisons:new Map(), requestCache:new Map() };
 const dkk = new Intl.NumberFormat('en-DK',{maximumFractionDigits:0});
 const colors = { actual:'#61adff', forecast:'#3fe09d', charge:'#ffb55f', discharge:'#e879f9', grid:'#213955', muted:'#8ea5bf', green:'#3fe09d', red:'#ff6b7a' };
 const modelNames = { Prediction:'Transfer residual ensemble', Hourly_Baseline:'Hourly baseline only', Direct_15min_Prediction:'Direct 15-min ensemble' };
@@ -232,7 +234,7 @@ function isProp(){ return state.tradingSetup==='prop'; }
 function actionNames(){ return isProp()?{buy:'long',sell:'short',buyLabel:'Long',sellLabel:'Short'}:{buy:'charge',sell:'discharge',buyLabel:'Charge',sellLabel:'Discharge'}; }
 function setStatus(text,kind='loading',detail=''){
   $('#statusText').textContent=text; $('#statusDetail').textContent=detail;
-  $('#calculationState').className=`calculation-state ${kind==='ok'?'ok':kind==='bad'?'bad':''}`;
+  $('#calculationState').className=`calculation-state ${['ok','dirty','bad'].includes(kind)?kind:''}`;
 }
 function setCalculating(active,optimize=false){
   const controls=document.querySelectorAll('.controls select,.controls input,.controls button');
@@ -249,11 +251,29 @@ function setCalculating(active,optimize=false){
     setStatus('Calculating strategy results…','loading',optimize?`Searching training grids, testing unseen days, and calculating ${costLabel} potential across ${count} strategies.`:`Running ${count} fixed strategies with ${costLabel} counterfactuals.`);
   }else{
     $('#run').textContent='Compare strategies';
-    $('#calculationElapsed').textContent='Complete';
+    $('#calculationElapsed').textContent=$('#calculationState').classList.contains('bad')?'Failed':'Complete';
     $('#strategy').disabled=!state.comparison;
   }
 }
 function metricForForecast(metrics,forecast){ return metrics.find(row=>row.Model===modelNames[forecast]); }
+
+function comparisonRequest(){
+  const days=selectedDays(); const roundTrip=Number($('#roundTrip').value)/100; const oneWayEfficiency=Math.sqrt(roundTrip); const dailyLoss=Number($('#dailyLossLimit').value);
+  return {forecast_col:$('#forecast').value,strategy:null,days,optimize:$('#mode').value==='optimized',test_days:6,trading_setup:state.tradingSetup,battery:{capacity_mwh:Number($('#capacity').value),power_mw:Number($('#power').value),initial_soc_mwh:0,charge_efficiency:oneWayEfficiency,discharge_efficiency:oneWayEfficiency,charge_fee_per_mwh:Number($('#chargeFee').value),discharge_fee_per_mwh:Number($('#dischargeFee').value)},prop:{initial_capital_dkk:Number($('#startingCapital').value),position_size_mwh:Number($('#positionSize').value),transaction_cost_dkk_per_mwh:Number($('#transactionCost').value),max_daily_loss_dkk:dailyLoss>0?dailyLoss:null}};
+}
+
+function controlsMatchComparison(data){
+  const request=comparisonRequest(),same=(left,right)=>Math.abs(Number(left)-Number(right))<1e-8;
+  if(request.forecast_col!==data.forecast_col||request.optimize!==(data.evaluation.mode==='out_of_sample_optimization')||request.days!==(data.request?.days??null))return false;
+  if(isProp())return same(request.prop.initial_capital_dkk,data.prop.initial_capital_dkk)&&same(request.prop.position_size_mwh,data.prop.position_size_mwh)&&same(request.prop.transaction_cost_dkk_per_mwh,data.prop.transaction_cost_dkk_per_mwh)&&request.prop.max_daily_loss_dkk==data.prop.max_daily_loss_dkk;
+  return same(request.battery.capacity_mwh,data.battery.capacity_mwh)&&same(request.battery.power_mw,data.battery.power_mw)&&same(request.battery.charge_efficiency,data.battery.charge_efficiency)&&same(request.battery.discharge_efficiency,data.battery.discharge_efficiency)&&same(request.battery.charge_fee_per_mwh,data.battery.charge_fee_per_mwh)&&same(request.battery.discharge_fee_per_mwh,data.battery.discharge_fee_per_mwh);
+}
+
+function markDirty(){
+  if(!state.comparison)return;
+  state.dirty=true; $('#calculationElapsed').textContent='Not run';
+  setStatus('Settings changed','dirty','The displayed results are unchanged. Click Compare strategies to calculate these settings.');
+}
 
 function updateSetupUI(){
   document.querySelectorAll('[data-trading-setup]').forEach(button=>{const active=button.dataset.tradingSetup===state.tradingSetup;button.classList.toggle('active',active);button.setAttribute('aria-pressed',String(active))});
@@ -366,35 +386,69 @@ function renderComparison(){
   renderCashflow(); renderTradeLog();
 }
 
+function renderSourceNote(){
+  if(!state.results)return;
+  const data=state.results.dataset;
+  $('#sourceNote').textContent=`Source: ${data.source_forecast_file} · ${data.rows.toLocaleString()} saved prediction intervals · Wind features: ${data.feature_source||'not available'} · ${isProp()?'Synthetic directional accounting; not an executable financial-contract backtest.':'Physical battery strategy calculations use realized prices.'} Research tooling only.`;
+}
+
+function readyStatus(source='calculated'){
+  const comparison=state.comparison,roundTrip=comparison.battery.charge_efficiency*comparison.battery.discharge_efficiency,setupStatus=isProp()?`${fmt(comparison.prop.position_size_mwh,1)} MWh positions · cost-adjusted and zero-cost potential`:`${fmt(roundTrip*100,1)}% round trip · fee-adjusted and zero-fee potential`;
+  $('#calculationElapsed').textContent=source==='saved'?'Saved':'Complete';
+  setStatus(source==='saved'?'Saved results displayed':'Results ready','ok',`${comparison.selected_strategy} selected · ${comparison.evaluation.mode==='out_of_sample_optimization'?'out-of-sample optimized':'fixed defaults'} · ${setupStatus}.`);
+}
+
+function applyComparison(comparison,source='calculated'){
+  state.comparison=comparison; state.dirty=false; renderModelMetrics(); renderComparison(); renderPrice(); renderSourceNote(); readyStatus(source);
+}
+
+function selectStrategy(name){
+  const series=state.comparison?.strategy_series?.[name]; if(!series)return;
+  state.comparison.selected_strategy=name; state.comparison.selected_strategy_series=series;
+  renderComparison(); renderPrice();
+  if(!state.dirty)readyStatus(state.comparison.saved_result?'saved':'calculated');
+}
+
+async function loadSavedDashboard(setup=state.tradingSetup){
+  state.tradingSetup=setup; state.comparison=null; state.dirty=false; $('#strategy').disabled=true; $('#strategy').innerHTML='<option value="">Loading strategies…</option>'; updateSetupUI();
+  $('#calculationElapsed').textContent='Saved'; setStatus('Loading saved results…','loading','Reading the deployment snapshot. No strategy optimization is running.');
+  try{
+    const resultsPromise=state.results?Promise.resolve(state.results):fetch('/api/results').then(async response=>{const data=await response.json();if(!response.ok)throw new Error(data.detail||`Results HTTP ${response.status}`);return data});
+    const comparisonPromise=state.savedComparisons.has(setup)?Promise.resolve(state.savedComparisons.get(setup)):fetch(`/api/saved-comparison/${setup}`).then(async response=>{const data=await response.json();if(!response.ok)throw new Error(data.detail||`Saved comparison HTTP ${response.status}`);state.savedComparisons.set(setup,data);return data});
+    const [results,comparison]=await Promise.all([resultsPromise,comparisonPromise]); state.results=results; applyComparison(comparison,'saved');
+    if(!controlsMatchComparison(comparison))markDirty();
+  }catch(error){setStatus('Saved results unavailable','bad',error.message);$('#calculationElapsed').textContent='Failed'}
+}
+
 async function loadDashboard(){
-  const days=selectedDays(); const query=days?`?days=${days}`:'';
-  const roundTrip=Number($('#roundTrip').value)/100; const oneWayEfficiency=Math.sqrt(roundTrip);
-  const strategy=$('#strategy').disabled||!$('#strategy').value?null:$('#strategy').value;
-  const optimize=$('#mode').value==='optimized';
-  const dailyLoss=Number($('#dailyLossLimit').value);
-  const request={forecast_col:$('#forecast').value,strategy,days,optimize,test_days:6,trading_setup:state.tradingSetup,battery:{capacity_mwh:Number($('#capacity').value),power_mw:Number($('#power').value),initial_soc_mwh:0,charge_efficiency:oneWayEfficiency,discharge_efficiency:oneWayEfficiency,charge_fee_per_mwh:Number($('#chargeFee').value),discharge_fee_per_mwh:Number($('#dischargeFee').value)},prop:{initial_capital_dkk:Number($('#startingCapital').value),position_size_mwh:Number($('#positionSize').value),transaction_cost_dkk_per_mwh:Number($('#transactionCost').value),max_daily_loss_dkk:dailyLoss>0?dailyLoss:null}};
+  const request=comparisonRequest(),days=request.days,query=days?`?days=${days}`:'',optimize=request.optimize; request.strategy=$('#strategy').disabled||!$('#strategy').value?null:$('#strategy').value;
+  const cacheKey=JSON.stringify(request);
   setCalculating(true,optimize);
   try{
-    const [resultsResponse,comparisonResponse]=await Promise.all([fetch(`/api/results${query}`),fetch('/api/compare',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(request)})]);
-    const results=await resultsResponse.json(),comparison=await comparisonResponse.json();
-    if(!resultsResponse.ok)throw new Error(results.detail||`Results HTTP ${resultsResponse.status}`); if(!comparisonResponse.ok)throw new Error(comparison.detail||`Comparison HTTP ${comparisonResponse.status}`);
-    state.results=results;state.comparison=comparison;renderModelMetrics();renderComparison();renderPrice();
-    $('#sourceNote').textContent=`Source: ${results.dataset.source_forecast_file} · ${results.dataset.rows.toLocaleString()} saved prediction intervals · Wind features: ${results.dataset.feature_source||'not available'} · ${isProp()?'Synthetic directional accounting; not an executable financial-contract backtest.':'Physical battery strategy calculations use realized prices.'} Research tooling only.`;
-    const setupStatus=isProp()?`${fmt(comparison.prop.position_size_mwh,1)} MWh positions · cost-adjusted and zero-cost potential calculated`:`${fmt(roundTrip*100,1)}% round trip · fee-adjusted and zero-fee potential calculated`;
-    setStatus('Results ready','ok',`${comparison.selected_strategy} selected · ${optimize?'out-of-sample optimized':'fixed defaults'} · ${setupStatus}.`);
+    let results,comparison;
+    if(state.requestCache.has(cacheKey)){({results,comparison}=state.requestCache.get(cacheKey));}
+    else{
+      const [resultsResponse,comparisonResponse]=await Promise.all([fetch(`/api/results${query}`),fetch('/api/compare',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(request)})]);
+      results=await resultsResponse.json();comparison=await comparisonResponse.json();
+      if(!resultsResponse.ok)throw new Error(results.detail||`Results HTTP ${resultsResponse.status}`); if(!comparisonResponse.ok)throw new Error(comparison.detail||`Comparison HTTP ${comparisonResponse.status}`);
+      state.requestCache.set(cacheKey,{results,comparison});
+    }
+    state.results=results; applyComparison(comparison,'calculated');
   }catch(error){setStatus('Calculation failed','bad',error.message)}
   finally{setCalculating(false)}
 }
 
 function setTradingSetup(setup){
   if(setup===state.tradingSetup)return;
-  state.tradingSetup=setup; state.comparison=null; $('#strategy').disabled=true; $('#strategy').innerHTML='<option value="">Loading strategies…</option>'; updateSetupUI(); loadDashboard();
+  loadSavedDashboard(setup);
 }
 
-$('#run').addEventListener('click',loadDashboard); $('#forecast').addEventListener('change',loadDashboard); $('#strategy').addEventListener('change',loadDashboard); $('#mode').addEventListener('change',loadDashboard); $('#window').addEventListener('change',loadDashboard); $('#downloadLog').addEventListener('click',downloadTradeLog);
+$('#run').addEventListener('click',loadDashboard); $('#strategy').addEventListener('change',event=>selectStrategy(event.target.value)); $('#downloadLog').addEventListener('click',downloadTradeLog);
+document.querySelectorAll('#forecast,#mode,#window').forEach(control=>control.addEventListener('change',markDirty));
+document.querySelectorAll('.controls input').forEach(control=>control.addEventListener('input',markDirty));
 document.querySelectorAll('[data-trading-setup]').forEach(button=>button.addEventListener('click',()=>setTradingSetup(button.dataset.tradingSetup)));
-$('#strategyRows').addEventListener('click',event=>{const row=event.target.closest('tr[data-strategy]');if(!row)return;$('#strategy').value=row.dataset.strategy;loadDashboard()});
-window.addEventListener('resize',()=>{renderPrice();renderCashflow()}); updateSetupUI(); loadDashboard();
+$('#strategyRows').addEventListener('click',event=>{const row=event.target.closest('tr[data-strategy]');if(!row)return;$('#strategy').value=row.dataset.strategy;selectStrategy(row.dataset.strategy)});
+window.addEventListener('resize',()=>{renderPrice();renderCashflow()}); updateSetupUI(); loadSavedDashboard();
 </script>
 </body>
 </html>

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, replace
 from functools import lru_cache
+import gzip
 import json
 import math
 from pathlib import Path
@@ -10,6 +11,7 @@ from typing import Any
 
 import pandas as pd
 from fastapi import FastAPI, HTTPException
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 
@@ -98,6 +100,11 @@ PROP_STRATEGIES = {
     "Predicted best hours",
     "Ensemble agreement",
     "Wind signal",
+}
+
+SAVED_COMPARISON_FILES = {
+    "battery": "default_battery_comparison.json.gz",
+    "prop": "default_prop_comparison.json.gz",
 }
 
 
@@ -259,6 +266,26 @@ def results(days: int | None = None) -> dict[str, Any]:
             ]
         ),
     }
+
+
+@lru_cache(maxsize=2)
+def _load_saved_comparison(trading_setup: str) -> dict[str, Any]:
+    path = PROJECT_ROOT / "deployment_data" / SAVED_COMPARISON_FILES[trading_setup]
+    if not path.exists():
+        raise FileNotFoundError(f"Saved {trading_setup} comparison is unavailable.")
+    with gzip.open(path, "rt", encoding="utf-8") as handle:
+        return json.load(handle)
+
+
+@app.get("/api/saved-comparison/{trading_setup}")
+def saved_comparison(trading_setup: str) -> dict[str, Any]:
+    normalized = trading_setup.lower().replace("-", "_")
+    if normalized not in SAVED_COMPARISON_FILES:
+        raise HTTPException(status_code=422, detail=f"Unknown trading setup: {trading_setup}")
+    try:
+        return _load_saved_comparison(normalized)
+    except (FileNotFoundError, OSError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 @app.post("/api/compare")
@@ -517,6 +544,12 @@ def compare_strategies(payload: StrategyComparisonRequest) -> dict[str, Any]:
     selected_series_columns = [
         column for column in series_columns if column in selected_simulation.columns
     ]
+    strategy_series: dict[str, list[dict[str, Any]]] = {}
+    for name, simulation in simulations.items():
+        serialized = simulation.copy()
+        serialized["Cumulative_Cashflow"] = serialized["Cashflow"].cumsum()
+        columns = [column for column in series_columns if column in serialized.columns]
+        strategy_series[name] = _json_records(serialized[columns])
     return _clean_json(
         {
             "dataset": {
@@ -547,6 +580,11 @@ def compare_strategies(payload: StrategyComparisonRequest) -> dict[str, Any]:
             "forecast_col": payload.forecast_col,
             "forecast_model": FORECAST_COLUMNS[payload.forecast_col],
             "trading_setup": trading_setup,
+            "request": {
+                "days": payload.days,
+                "optimize": payload.optimize,
+                "test_days": payload.test_days,
+            },
             "battery": asdict(battery),
             "prop": asdict(prop),
             "perfect_foresight_benchmark": {
@@ -577,6 +615,7 @@ def compare_strategies(payload: StrategyComparisonRequest) -> dict[str, Any]:
             "selected_strategy_series": _json_records(
                 selected_simulation[selected_series_columns]
             ),
+            "strategy_series": strategy_series,
         }
     )
 
@@ -637,3 +676,6 @@ def simulate(payload: SimulationRequest) -> dict[str, Any]:
     if payload.include_intervals:
         response["intervals"] = _json_records(intervals)
     return response
+
+
+app.mount("/", StaticFiles(directory=PROJECT_ROOT / "public", html=True), name="dashboard")

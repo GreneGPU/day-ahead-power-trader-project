@@ -91,6 +91,13 @@ def test_strategy_comparison_uses_all_strategy_families() -> None:
     assert payload["perfect_foresight_benchmark"]["Final_SOC_MWh"] == 0
     assert payload["best_strategy"] == payload["strategies"][0]["Strategy"]
     assert len(payload["best_strategy_series"]) == payload["dataset"]["selected_rows"]
+    assert set(payload["strategy_series"]) == {
+        row["Strategy"] for row in payload["strategies"]
+    }
+    assert all(
+        len(series) == payload["dataset"]["selected_rows"]
+        for series in payload["strategy_series"].values()
+    )
     assert payload["strategies"][0]["Fee_Cost"] > 0
     assert math.isclose(payload["strategies"][0]["Round_Trip_Efficiency_Pct"], 90)
     daily_spread = next(row for row in payload["strategies"] if row["Strategy"] == "Daily spread rank")
@@ -189,6 +196,19 @@ def test_prop_comparison_rejects_battery_only_optimizer() -> None:
     )
     assert response.status_code == 422
     assert "battery-only" in response.json()["detail"]
+
+
+def test_saved_comparisons_are_available_without_recalculation() -> None:
+    for setup, expected_count in (("battery", 16), ("prop", 12)):
+        response = client.get(f"/api/saved-comparison/{setup}")
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["saved_result"] is True
+        assert payload["trading_setup"] == setup
+        assert len(payload["strategies"]) == expected_count
+        assert set(payload["strategy_series"]) == {
+            row["Strategy"] for row in payload["strategies"]
+        }
 
 
 def test_strategy_optimization_uses_earlier_train_and_later_unseen_test_data() -> None:
