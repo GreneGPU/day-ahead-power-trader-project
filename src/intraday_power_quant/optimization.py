@@ -9,25 +9,37 @@ import pandas as pd
 from .risk import summarize_cashflow_risk
 from .trading import (
     BatteryConfig,
+    BestHoursConfig,
     ChannelBreakoutConfig,
     DailySpreadConfig,
+    DegradationOptimizerConfig,
     EnsembleAgreementConfig,
     ForecastEdgeConfig,
     MeanReversionConfig,
     MomentumConfig,
     MomentumSpreadConfig,
+    RollingOptimizerConfig,
+    UncertaintyOptimizerConfig,
     VolatilityFilterConfig,
     WeeklyBandConfig,
+    WindConfirmedOptimizerConfig,
+    WindSignalConfig,
     simulate_battery_arbitrage,
+    simulate_predicted_best_hours_arbitrage,
     simulate_channel_breakout_arbitrage,
     simulate_daily_spread_rank_arbitrage,
+    simulate_degradation_aware_optimizer,
     simulate_ensemble_agreement_arbitrage,
     simulate_forecast_edge_arbitrage,
     simulate_mean_reversion_arbitrage,
     simulate_momentum_arbitrage,
     simulate_momentum_spread_arbitrage,
+    simulate_rolling_price_optimizer,
+    simulate_uncertainty_aware_optimizer,
     simulate_volatility_filtered_average_arbitrage,
     simulate_weekly_average_band_arbitrage,
+    simulate_wind_confirmed_optimizer,
+    simulate_wind_signal_arbitrage,
 )
 
 
@@ -161,6 +173,10 @@ def simulate_strategy_from_settings(
         return simulate_daily_spread_rank_arbitrage(
             df, battery, DailySpreadConfig(**payload), time_col, actual_col, forecast_col
         )
+    if strategy == "Predicted best hours":
+        return simulate_predicted_best_hours_arbitrage(
+            df, battery, BestHoursConfig(**payload), time_col, actual_col, forecast_col
+        )
     if strategy == "Ensemble agreement":
         return simulate_ensemble_agreement_arbitrage(
             df, battery, EnsembleAgreementConfig(**payload), time_col, actual_col, forecast_col
@@ -172,6 +188,31 @@ def simulate_strategy_from_settings(
     if strategy == "Channel breakout":
         return simulate_channel_breakout_arbitrage(
             df, battery, ChannelBreakoutConfig(**payload), time_col, actual_col, forecast_col
+        )
+    if strategy == "Rolling price optimizer":
+        return simulate_rolling_price_optimizer(
+            df, battery, RollingOptimizerConfig(**payload), time_col, actual_col, forecast_col
+        )
+    if strategy == "Uncertainty-aware optimizer":
+        return simulate_uncertainty_aware_optimizer(
+            df, battery, UncertaintyOptimizerConfig(**payload), time_col, actual_col, forecast_col
+        )
+    if strategy == "Degradation-aware optimizer":
+        return simulate_degradation_aware_optimizer(
+            df, battery, DegradationOptimizerConfig(**payload), time_col, actual_col, forecast_col
+        )
+    if strategy == "Wind signal":
+        return simulate_wind_signal_arbitrage(
+            df, battery, WindSignalConfig(**payload), time_col, actual_col, forecast_col
+        )
+    if strategy == "Wind-confirmed optimizer":
+        return simulate_wind_confirmed_optimizer(
+            df,
+            battery,
+            WindConfirmedOptimizerConfig(**payload),
+            time_col,
+            actual_col,
+            forecast_col,
         )
     raise KeyError(f"Unknown strategy: {strategy}")
 
@@ -332,6 +373,23 @@ def run_strategy_parameter_sweep(
             lambda cfg=cfg: simulate_daily_spread_rank_arbitrage(df, battery, cfg, time_col, actual_col, forecast_col),
         )
 
+    for hours_per_day in [1, 2, 3, 4]:
+        for min_profit_dkk_per_mwh in [0.0, 20.0, 40.0, 60.0]:
+            settings = {
+                "hours_per_day": hours_per_day,
+                "min_profit_dkk_per_mwh": min_profit_dkk_per_mwh,
+                "market_timezone": "Europe/Copenhagen",
+            }
+            cfg = BestHoursConfig(**settings)
+            _add_result(
+                rows,
+                "Predicted best hours",
+                settings,
+                lambda cfg=cfg: simulate_predicted_best_hours_arbitrage(
+                    df, battery, cfg, time_col, actual_col, forecast_col
+                ),
+            )
+
     for settings in _iter_ensemble_grid():
         cfg = EnsembleAgreementConfig(**settings)
         _add_result(
@@ -360,6 +418,95 @@ def run_strategy_parameter_sweep(
                 settings,
                 lambda cfg=cfg: simulate_channel_breakout_arbitrage(df, battery, cfg, time_col, actual_col, forecast_col),
             )
+
+    rolling_settings = {
+        "soc_steps": 40,
+        "terminal_soc_mwh": 0.0,
+        "market_timezone": "Europe/Copenhagen",
+    }
+    rolling_cfg = RollingOptimizerConfig(**rolling_settings)
+    _add_result(
+        rows,
+        "Rolling price optimizer",
+        rolling_settings,
+        lambda: simulate_rolling_price_optimizer(
+            df, battery, rolling_cfg, time_col, actual_col, forecast_col
+        ),
+    )
+
+    for uncertainty_penalty in [0.5, 1.0, 2.0]:
+        for max_model_spread in [40.0, 80.0, None]:
+            settings = {
+                "uncertainty_penalty": uncertainty_penalty,
+                "max_model_spread": max_model_spread,
+                "soc_steps": 40,
+                "terminal_soc_mwh": 0.0,
+                "market_timezone": "Europe/Copenhagen",
+            }
+            cfg = UncertaintyOptimizerConfig(**settings)
+            _add_result(
+                rows,
+                "Uncertainty-aware optimizer",
+                settings,
+                lambda cfg=cfg: simulate_uncertainty_aware_optimizer(
+                    df, battery, cfg, time_col, actual_col, forecast_col
+                ),
+            )
+
+    for degradation_cost_per_mwh in [20.0, 40.0, 80.0, 120.0]:
+        settings = {
+            "degradation_cost_per_mwh": degradation_cost_per_mwh,
+            "soc_steps": 40,
+            "terminal_soc_mwh": 0.0,
+            "market_timezone": "Europe/Copenhagen",
+        }
+        cfg = DegradationOptimizerConfig(**settings)
+        _add_result(
+            rows,
+            "Degradation-aware optimizer",
+            settings,
+            lambda cfg=cfg: simulate_degradation_aware_optimizer(
+                df, battery, cfg, time_col, actual_col, forecast_col
+            ),
+        )
+
+    if "Wind_Total_DayAhead_MW" in df.columns:
+        for low_wind_quantile, high_wind_quantile in [
+            (0.20, 0.80),
+            (0.25, 0.75),
+            (0.30, 0.70),
+        ]:
+            for ramp_threshold_mw in [0.0, 100.0, 250.0]:
+                settings = {
+                    "low_wind_quantile": low_wind_quantile,
+                    "high_wind_quantile": high_wind_quantile,
+                    "ramp_threshold_mw": ramp_threshold_mw,
+                    "market_timezone": "Europe/Copenhagen",
+                }
+                cfg = WindSignalConfig(**settings)
+                _add_result(
+                    rows,
+                    "Wind signal",
+                    settings,
+                    lambda cfg=cfg: simulate_wind_signal_arbitrage(
+                        df, battery, cfg, time_col, actual_col, forecast_col
+                    ),
+                )
+
+                confirmed_settings = {
+                    **settings,
+                    "soc_steps": 40,
+                    "terminal_soc_mwh": 0.0,
+                }
+                confirmed_cfg = WindConfirmedOptimizerConfig(**confirmed_settings)
+                _add_result(
+                    rows,
+                    "Wind-confirmed optimizer",
+                    confirmed_settings,
+                    lambda cfg=confirmed_cfg: simulate_wind_confirmed_optimizer(
+                        df, battery, cfg, time_col, actual_col, forecast_col
+                    ),
+                )
 
     return pd.DataFrame(rows).sort_values(["Cashflow", "Max_Drawdown"], ascending=[False, True]).reset_index(drop=True)
 

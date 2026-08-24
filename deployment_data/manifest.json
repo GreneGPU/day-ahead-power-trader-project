@@ -1,0 +1,22 @@
+{
+  "source_forecast_file": "transfer_15min_forecasts_thesis_ready.xlsx",
+  "source_metrics_file": "transfer_15min_metrics_thesis_ready.xlsx",
+  "rows": 2116,
+  "start": "2026-02-10T22:00:00+00:00",
+  "end": "2026-03-04T22:45:00+00:00",
+  "forecast_columns": [
+    "Hourly_Baseline",
+    "Prediction",
+    "Direct_15min_Prediction"
+  ],
+  "feature_columns": [
+    "Wind_Offshore_DayAhead_MW",
+    "Wind_Onshore_DayAhead_MW",
+    "Wind_Total_DayAhead_MW",
+    "Solar_DayAhead_MW",
+    "Wind_Total_Intraday_MW",
+    "Wind_Intraday_Revision_MW"
+  ],
+  "feature_source": "Energinet Forecasts_Hour, DK1",
+  "feature_source_url": "https://www.energidataservice.dk/tso-electricity/Forecasts_Hour"
+}

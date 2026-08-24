@@ -22,12 +22,14 @@ DEFAULT_MIN15_CANDIDATES = [
 class BatterySettings:
     capacity_mwh: float = 100.0
     power_mw: float = 25.0
-    initial_soc_mwh: float = 50.0
-    charge_efficiency: float = 0.95
-    discharge_efficiency: float = 0.95
+    initial_soc_mwh: float = 0.0
+    charge_efficiency: float = 0.90**0.5
+    discharge_efficiency: float = 0.90**0.5
     low_quantile: float = 0.25
     high_quantile: float = 0.75
     fee_per_mwh: float = 0.0
+    charge_fee_per_mwh: float = 0.0
+    discharge_fee_per_mwh: float = 0.0
     max_daily_loss: float | None = None
 
 
@@ -98,11 +100,60 @@ class DailySpreadSettings:
 
 
 @dataclass(frozen=True)
+class BestHoursSettings:
+    hours_per_day: int = 2
+    min_profit_dkk_per_mwh: float = 0.0
+    market_timezone: str = "Europe/Copenhagen"
+
+
+@dataclass(frozen=True)
 class EnsembleAgreementSettings:
     low_quantile: float = 0.25
     high_quantile: float = 0.75
     min_agreement: float = 0.60
     max_model_spread: float | None = None
+
+
+@dataclass(frozen=True)
+class RollingOptimizerSettings:
+    soc_steps: int = 40
+    terminal_soc_mwh: float = 0.0
+    market_timezone: str = "Europe/Copenhagen"
+
+
+@dataclass(frozen=True)
+class UncertaintyOptimizerSettings:
+    uncertainty_penalty: float = 1.0
+    max_model_spread: float | None = 80.0
+    soc_steps: int = 40
+    terminal_soc_mwh: float = 0.0
+    market_timezone: str = "Europe/Copenhagen"
+
+
+@dataclass(frozen=True)
+class DegradationOptimizerSettings:
+    degradation_cost_per_mwh: float = 40.0
+    soc_steps: int = 40
+    terminal_soc_mwh: float = 0.0
+    market_timezone: str = "Europe/Copenhagen"
+
+
+@dataclass(frozen=True)
+class WindSignalSettings:
+    low_wind_quantile: float = 0.25
+    high_wind_quantile: float = 0.75
+    ramp_threshold_mw: float = 100.0
+    market_timezone: str = "Europe/Copenhagen"
+
+
+@dataclass(frozen=True)
+class WindConfirmedOptimizerSettings:
+    low_wind_quantile: float = 0.25
+    high_wind_quantile: float = 0.75
+    ramp_threshold_mw: float = 100.0
+    soc_steps: int = 40
+    terminal_soc_mwh: float = 0.0
+    market_timezone: str = "Europe/Copenhagen"
 
 
 @dataclass(frozen=True)
@@ -131,7 +182,19 @@ class ProjectConfig:
     momentum_spread: MomentumSpreadSettings = field(default_factory=MomentumSpreadSettings)
     channel_breakout: ChannelBreakoutSettings = field(default_factory=ChannelBreakoutSettings)
     daily_spread: DailySpreadSettings = field(default_factory=DailySpreadSettings)
+    best_hours: BestHoursSettings = field(default_factory=BestHoursSettings)
     ensemble_agreement: EnsembleAgreementSettings = field(default_factory=EnsembleAgreementSettings)
+    rolling_optimizer: RollingOptimizerSettings = field(default_factory=RollingOptimizerSettings)
+    uncertainty_optimizer: UncertaintyOptimizerSettings = field(
+        default_factory=UncertaintyOptimizerSettings
+    )
+    degradation_optimizer: DegradationOptimizerSettings = field(
+        default_factory=DegradationOptimizerSettings
+    )
+    wind_signal: WindSignalSettings = field(default_factory=WindSignalSettings)
+    wind_confirmed_optimizer: WindConfirmedOptimizerSettings = field(
+        default_factory=WindConfirmedOptimizerSettings
+    )
 
     @classmethod
     def from_mapping(cls, data: dict[str, Any]) -> "ProjectConfig":
@@ -154,8 +217,28 @@ class ProjectConfig:
             payload["channel_breakout"] = ChannelBreakoutSettings(**payload["channel_breakout"])
         if "daily_spread" in payload and isinstance(payload["daily_spread"], dict):
             payload["daily_spread"] = DailySpreadSettings(**payload["daily_spread"])
+        if "best_hours" in payload and isinstance(payload["best_hours"], dict):
+            payload["best_hours"] = BestHoursSettings(**payload["best_hours"])
         if "ensemble_agreement" in payload and isinstance(payload["ensemble_agreement"], dict):
             payload["ensemble_agreement"] = EnsembleAgreementSettings(**payload["ensemble_agreement"])
+        if "rolling_optimizer" in payload and isinstance(payload["rolling_optimizer"], dict):
+            payload["rolling_optimizer"] = RollingOptimizerSettings(**payload["rolling_optimizer"])
+        if "uncertainty_optimizer" in payload and isinstance(payload["uncertainty_optimizer"], dict):
+            payload["uncertainty_optimizer"] = UncertaintyOptimizerSettings(
+                **payload["uncertainty_optimizer"]
+            )
+        if "degradation_optimizer" in payload and isinstance(payload["degradation_optimizer"], dict):
+            payload["degradation_optimizer"] = DegradationOptimizerSettings(
+                **payload["degradation_optimizer"]
+            )
+        if "wind_signal" in payload and isinstance(payload["wind_signal"], dict):
+            payload["wind_signal"] = WindSignalSettings(**payload["wind_signal"])
+        if "wind_confirmed_optimizer" in payload and isinstance(
+            payload["wind_confirmed_optimizer"], dict
+        ):
+            payload["wind_confirmed_optimizer"] = WindConfirmedOptimizerSettings(
+                **payload["wind_confirmed_optimizer"]
+            )
         for key in ["data_dir", "reference_results_dir", "output_dir"]:
             if key in payload:
                 payload[key] = Path(payload[key])
@@ -203,7 +286,13 @@ def write_config(config: ProjectConfig, path: str | Path) -> None:
         "momentum_spread": config.momentum_spread.__dict__,
         "channel_breakout": config.channel_breakout.__dict__,
         "daily_spread": config.daily_spread.__dict__,
+        "best_hours": config.best_hours.__dict__,
         "ensemble_agreement": config.ensemble_agreement.__dict__,
+        "rolling_optimizer": config.rolling_optimizer.__dict__,
+        "uncertainty_optimizer": config.uncertainty_optimizer.__dict__,
+        "degradation_optimizer": config.degradation_optimizer.__dict__,
+        "wind_signal": config.wind_signal.__dict__,
+        "wind_confirmed_optimizer": config.wind_confirmed_optimizer.__dict__,
     }
     output_path = Path(path)
     output_path.parent.mkdir(parents=True, exist_ok=True)

@@ -2,6 +2,12 @@
 
 Transfer-learning 15-minute day-ahead electricity-price forecasting and flexibility simulation for DK1/DK2-style power trader research.
 
+Live dashboard: https://greneportfolio.vercel.app/
+
+The live dashboard defaults to 90% round-trip battery efficiency and a 2026 DK1 distribution-connected fee assumption: 115.41 DKK/MWh while charging and 10.71 DKK/MWh while discharging. These editable amounts combine Energinet's variable tariffs with Nord Pool's standard day-ahead trading and clearing fee; local DSO tariffs, taxes, VAT, fixed/capacity charges, imbalance costs, and currency service are excluded.
+
+Its default evaluation mode reserves the final six complete DK1 calendar days as a chronological holdout: every strategy searches its parameter grid for the highest net cashflow on all earlier available observations, then the dashboard ranks strategies, calculates daily Sharpe, and shows trade logs using only those six unseen days. A fixed-default mode remains available for comparison.
+
 This repo turns the thesis notebook into a maintainable project:
 
 - hourly source ensemble trained before the 15-minute transition
@@ -13,6 +19,10 @@ This repo turns the thesis notebook into a maintainable project:
 - model-ranking metrics, coverage checks, leakage warnings, and ablation entry point
 - forecast-driven battery arbitrage simulator
 - selectable strategy suite with user-adjustable parameters
+- live strategy selection with per-interval charge/discharge logs and CSV export
+- DK1 actual-versus-prediction chart with charge and discharge execution markers
+- empty battery at the start of every default simulation, avoiding free initial inventory
+- predicted-best-hours strategy that pairs cheap forecast hours with later expensive hours only when the efficiency- and fee-adjusted paper spread is positive
 - parameter sweep that finds the best cashflow setting for each strategy
 - risk-adjusted strategy ranking, walk-forward validation, execution-cost stress testing, robustness grids, regime analysis, uncertainty diagnostics, and latest-decision output
 - standalone HTML dashboard and markdown report
@@ -79,6 +89,13 @@ python -m venv .venv
 .venv\Scripts\python -m pip install -e .
 ```
 
+The Vercel API installs the lightweight base dependencies only. For a local
+editable install that also includes the model-training stack, use:
+
+```powershell
+.venv\Scripts\python -m pip install -e ".[training,dashboard,dev]"
+```
+
 If `python` is not on PATH, use the Python executable you normally use for the thesis environment.
 
 ## Testing Window
@@ -140,6 +157,18 @@ The Streamlit dashboard supports multiple dispatch strategies and day-ahead rese
 - `Channel breakout`: uses recent rolling high/low forecast channels and trades when the forecast breaks outside the channel.
 - `Daily spread rank`: ranks forecast prices inside each day, charging in the cheapest forecast intervals and discharging in the most expensive intervals. It can require a minimum daily forecast spread before trading.
 - `Ensemble agreement`: trades only when enough ensemble members agree that an interval is cheap or expensive.
+- `Predicted best hours`: pairs cheap predicted hours with later expensive predicted hours only when the paper spread covers efficiency and fees.
+- `Rolling price optimizer`: uses a discretized daily dynamic program to maximize predicted net cashflow while ending each day empty.
+- `Uncertainty-aware optimizer`: penalizes or blocks trades when the available price forecasts disagree.
+- `Degradation-aware optimizer`: includes an explicit battery-wear cost per MWh in both optimization and realized PnL.
+- `Wind signal`: uses only Energinet DK1 day-ahead wind level and ramp signals to choose actions.
+- `Wind-confirmed optimizer`: permits predicted-price optimizer actions only when day-ahead wind conditions confirm them.
+
+The deployed comparison also reports a perfect-foresight dynamic-program benchmark based on actual
+test prices. It is labeled as a hindsight opportunity ceiling and is not ranked as a tradable strategy.
+For each strategy, the site also calculates a no-fee potential counterfactual by setting all modeled
+trading fees to zero while retaining battery efficiency and degradation costs. In optimized mode,
+both fee-adjusted and no-fee potential are re-optimized on the test period and labeled as hindsight-only.
 
 The `Quant research checks` panel adds:
 

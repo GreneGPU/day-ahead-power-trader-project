@@ -25,6 +25,7 @@ from intraday_power_quant.research import (
 )
 from intraday_power_quant.trading import (
     BatteryConfig,
+    BestHoursConfig,
     ChannelBreakoutConfig,
     DailySpreadConfig,
     EnsembleAgreementConfig,
@@ -49,6 +50,7 @@ DEFAULT_MOMENTUM = MomentumConfig()
 DEFAULT_MOMENTUM_SPREAD = MomentumSpreadConfig()
 DEFAULT_BREAKOUT = ChannelBreakoutConfig()
 DEFAULT_DAILY_SPREAD = DailySpreadConfig()
+DEFAULT_BEST_HOURS = BestHoursConfig()
 DEFAULT_ENSEMBLE = EnsembleAgreementConfig()
 DEFAULT_RESULTS_DIR = "outputs/model_run_last30" if Path("outputs/model_run_last30").exists() else "outputs/model_run"
 
@@ -147,7 +149,7 @@ with st.sidebar:
     st.subheader("Battery")
     capacity = st.number_input("Capacity MWh", min_value=1.0, value=100.0, step=10.0)
     power = st.number_input("Power MW", min_value=1.0, value=25.0, step=5.0)
-    initial_soc = st.number_input("Initial SOC MWh", min_value=0.0, value=50.0, step=10.0)
+    initial_soc = st.number_input("Initial SOC MWh", min_value=0.0, value=0.0, step=10.0)
     charge_efficiency = st.slider("Charge efficiency", 0.50, 1.00, 0.95, 0.01)
     discharge_efficiency = st.slider("Discharge efficiency", 0.50, 1.00, 0.95, 0.01)
     fee = st.number_input("Fee per MWh", min_value=0.0, value=0.0, step=1.0)
@@ -164,6 +166,7 @@ with st.sidebar:
     momentum_spread_cfg = DEFAULT_MOMENTUM_SPREAD
     breakout_cfg = DEFAULT_BREAKOUT
     daily_cfg = DEFAULT_DAILY_SPREAD
+    best_hours_cfg = DEFAULT_BEST_HOURS
     ensemble_cfg = DEFAULT_ENSEMBLE
     selected_parameters: dict[str, float | str] = {}
 
@@ -490,6 +493,27 @@ with st.sidebar:
             "Max model spread": "Off" if ensemble_cfg.max_model_spread is None else ensemble_cfg.max_model_spread,
         }
         st.caption("Uses the available TL ensemble members first; it falls back to direct models if TL columns are absent.")
+    elif strategy == "Predicted best hours":
+        best_hours_cfg = BestHoursConfig(
+            hours_per_day=st.number_input(
+                "Profitable hour pairs per day",
+                min_value=1,
+                max_value=6,
+                value=DEFAULT_BEST_HOURS.hours_per_day,
+                step=1,
+            ),
+            min_profit_dkk_per_mwh=st.number_input(
+                "Minimum predicted profit, DKK/MWh",
+                min_value=0.0,
+                value=DEFAULT_BEST_HOURS.min_profit_dkk_per_mwh,
+                step=5.0,
+            ),
+        )
+        selected_parameters = {
+            "Profitable hour pairs per day": best_hours_cfg.hours_per_day,
+            "Minimum predicted profit DKK/MWh": best_hours_cfg.min_profit_dkk_per_mwh,
+        }
+        st.caption("Pairs cheap predicted hours with later expensive hours only when efficiency-adjusted prices cover all fees.")
 
 try:
     forecasts, metrics = load_results(results_dir)
@@ -516,6 +540,7 @@ strategy_results = run_strategy_suite(
     mean_reversion_config=mean_cfg,
     breakout_config=breakout_cfg,
     daily_spread_config=daily_cfg,
+    best_hours_config=best_hours_cfg,
     momentum_config=momentum_cfg,
     momentum_spread_config=momentum_spread_cfg,
     ensemble_agreement_config=ensemble_cfg,

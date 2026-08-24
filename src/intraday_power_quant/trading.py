@@ -10,12 +10,14 @@ import pandas as pd
 class BatteryConfig:
     capacity_mwh: float = 100.0
     power_mw: float = 25.0
-    initial_soc_mwh: float = 50.0
-    charge_efficiency: float = 0.95
-    discharge_efficiency: float = 0.95
+    initial_soc_mwh: float = 0.0
+    charge_efficiency: float = 0.90**0.5
+    discharge_efficiency: float = 0.90**0.5
     low_quantile: float = 0.25
     high_quantile: float = 0.75
     fee_per_mwh: float = 0.0
+    charge_fee_per_mwh: float = 0.0
+    discharge_fee_per_mwh: float = 0.0
     max_daily_loss: float | None = None
 
 
@@ -86,11 +88,60 @@ class DailySpreadConfig:
 
 
 @dataclass(frozen=True)
+class BestHoursConfig:
+    hours_per_day: int = 2
+    min_profit_dkk_per_mwh: float = 0.0
+    market_timezone: str = "Europe/Copenhagen"
+
+
+@dataclass(frozen=True)
 class EnsembleAgreementConfig:
     low_quantile: float = 0.25
     high_quantile: float = 0.75
     min_agreement: float = 0.60
     max_model_spread: float | None = None
+
+
+@dataclass(frozen=True)
+class RollingOptimizerConfig:
+    soc_steps: int = 40
+    terminal_soc_mwh: float = 0.0
+    market_timezone: str = "Europe/Copenhagen"
+
+
+@dataclass(frozen=True)
+class UncertaintyOptimizerConfig:
+    uncertainty_penalty: float = 1.0
+    max_model_spread: float | None = 80.0
+    soc_steps: int = 40
+    terminal_soc_mwh: float = 0.0
+    market_timezone: str = "Europe/Copenhagen"
+
+
+@dataclass(frozen=True)
+class DegradationOptimizerConfig:
+    degradation_cost_per_mwh: float = 40.0
+    soc_steps: int = 40
+    terminal_soc_mwh: float = 0.0
+    market_timezone: str = "Europe/Copenhagen"
+
+
+@dataclass(frozen=True)
+class WindSignalConfig:
+    low_wind_quantile: float = 0.25
+    high_wind_quantile: float = 0.75
+    ramp_threshold_mw: float = 100.0
+    market_timezone: str = "Europe/Copenhagen"
+
+
+@dataclass(frozen=True)
+class WindConfirmedOptimizerConfig:
+    low_wind_quantile: float = 0.25
+    high_wind_quantile: float = 0.75
+    ramp_threshold_mw: float = 100.0
+    soc_steps: int = 40
+    terminal_soc_mwh: float = 0.0
+    market_timezone: str = "Europe/Copenhagen"
 
 
 PREFERRED_ENSEMBLE_COLUMNS = [
@@ -148,9 +199,35 @@ STRATEGY_DESCRIPTIONS = {
         "Ranks forecast prices within each day and can require a minimum daily forecast spread before "
         "trading the cheapest and most expensive intervals."
     ),
+    "Predicted best hours": (
+        "Pairs the cheapest predicted DK1 hours with later expensive predicted hours. It only charges "
+        "when the predicted sale covers round-trip losses, charge fees, discharge fees, and the selected "
+        "minimum paper-profit margin."
+    ),
     "Ensemble agreement": (
-        "Uses the transfer-learning ensemble members as a confidence filter. It trades only when enough "
-        "models agree that the interval is cheap or expensive."
+        "Uses the available ensemble prediction series as a confidence filter. It trades only when enough "
+        "model outputs agree that the interval is cheap or expensive."
+    ),
+    "Rolling price optimizer": (
+        "Uses a daily dynamic program to choose the complete predicted-price charge/discharge path while "
+        "respecting battery power, state of charge, efficiency, fees, and an empty end-of-day target."
+    ),
+    "Uncertainty-aware optimizer": (
+        "Optimizes the daily battery path using conservative buy and sell prices. Wider disagreement between "
+        "the three forecast series makes a trade less attractive or blocks it entirely."
+    ),
+    "Degradation-aware optimizer": (
+        "Runs the daily price optimizer after deducting an explicit battery-wear cost from every MWh charged "
+        "and discharged, so marginal cycles are skipped."
+    ),
+    "Wind signal": (
+        "A feature-only benchmark using Energinet DK1 day-ahead onshore and offshore wind forecasts. It charges "
+        "during high or sharply rising wind and discharges during low or sharply falling wind; prices do not "
+        "choose the action."
+    ),
+    "Wind-confirmed optimizer": (
+        "Uses the predicted-price dynamic optimizer but permits charging only during high/rising forecast wind "
+        "and discharging only during low/falling forecast wind."
     ),
 }
 
@@ -211,7 +288,14 @@ def _simulate_battery_dispatch(
     time_col: str,
     actual_col: str,
     action_col: str,
+    degradation_cost_per_mwh: float = 0.0,
 ) -> tuple[pd.DataFrame, dict[str, float]]:
+    if not 0 < cfg.charge_efficiency <= 1 or not 0 < cfg.discharge_efficiency <= 1:
+        raise ValueError("Charge and discharge efficiencies must be greater than 0 and at most 1.")
+    if min(cfg.fee_per_mwh, cfg.charge_fee_per_mwh, cfg.discharge_fee_per_mwh) < 0:
+        raise ValueError("Battery fees must be non-negative.")
+    if degradation_cost_per_mwh < 0:
+        raise ValueError("Battery degradation cost must be non-negative.")
     step_hours = _infer_step_hours(sim[time_col])
     soc = min(max(cfg.initial_soc_mwh, 0.0), cfg.capacity_mwh)
     rows: list[dict[str, float | str | pd.Timestamp]] = []
@@ -222,6 +306,12 @@ def _simulate_battery_dispatch(
         timestamp = row_dict[time_col]
         actual_price = float(row_dict[actual_col])
         requested_action = str(row_dict[action_col])
+        requested_power = row_dict.get("Requested_Power_MW", cfg.power_mw)
+        requested_power = (
+            cfg.power_mw
+            if requested_power is None or pd.isna(requested_power)
+            else min(abs(float(requested_power)), cfg.power_mw)
+        )
         date_key = timestamp.date()
         daily_cashflow.setdefault(date_key, 0.0)
 
@@ -234,17 +324,23 @@ def _simulate_battery_dispatch(
 
         if not blocked_by_risk and requested_action == "charge" and soc < cfg.capacity_mwh:
             max_charge_mw = (cfg.capacity_mwh - soc) / (step_hours * cfg.charge_efficiency)
-            dispatch_mw = -min(cfg.power_mw, max_charge_mw)
+            dispatch_mw = -min(requested_power, max_charge_mw)
             energy_mwh = abs(dispatch_mw) * step_hours
             soc += energy_mwh * cfg.charge_efficiency
-            cashflow = -energy_mwh * actual_price - energy_mwh * cfg.fee_per_mwh
+            cashflow = -energy_mwh * actual_price - energy_mwh * (
+                cfg.fee_per_mwh + cfg.charge_fee_per_mwh
+                + degradation_cost_per_mwh
+            )
             action = "charge"
         elif not blocked_by_risk and requested_action == "discharge" and soc > 0:
             max_discharge_mw = soc * cfg.discharge_efficiency / step_hours
-            dispatch_mw = min(cfg.power_mw, max_discharge_mw)
+            dispatch_mw = min(requested_power, max_discharge_mw)
             energy_mwh = dispatch_mw * step_hours
             soc -= energy_mwh / cfg.discharge_efficiency
-            cashflow = energy_mwh * actual_price - energy_mwh * cfg.fee_per_mwh
+            cashflow = energy_mwh * actual_price - energy_mwh * (
+                cfg.fee_per_mwh + cfg.discharge_fee_per_mwh
+                + degradation_cost_per_mwh
+            )
             action = "discharge"
         elif blocked_by_risk:
             action = "risk-off"
@@ -266,6 +362,13 @@ def _simulate_battery_dispatch(
     out["Cumulative_Cashflow"] = out["Cashflow"].cumsum()
     total_energy_charged = float((-out.loc[out["Dispatch_MW"] < 0, "Dispatch_MW"] * step_hours).sum())
     total_energy_discharged = float((out.loc[out["Dispatch_MW"] > 0, "Dispatch_MW"] * step_hours).sum())
+    total_fee_cost = (
+        total_energy_charged * (cfg.fee_per_mwh + cfg.charge_fee_per_mwh)
+        + total_energy_discharged * (cfg.fee_per_mwh + cfg.discharge_fee_per_mwh)
+    )
+    total_degradation_cost = (
+        total_energy_charged + total_energy_discharged
+    ) * degradation_cost_per_mwh
     summary = {
         "total_cashflow": float(out["Cashflow"].sum()),
         "max_drawdown": float((out["Cumulative_Cashflow"].cummax() - out["Cumulative_Cashflow"]).max()),
@@ -274,6 +377,9 @@ def _simulate_battery_dispatch(
         "discharge_intervals": int((out["Action"] == "discharge").sum()),
         "energy_charged_mwh": total_energy_charged,
         "energy_discharged_mwh": total_energy_discharged,
+        "total_fee_cost": float(total_fee_cost),
+        "total_degradation_cost": float(total_degradation_cost),
+        "round_trip_efficiency": float(cfg.charge_efficiency * cfg.discharge_efficiency),
         "step_hours": step_hours,
         "final_soc_mwh": float(out["State_Of_Charge_MWh"].iloc[-1]) if not out.empty else float("nan"),
     }
@@ -786,6 +892,574 @@ def simulate_daily_spread_rank_arbitrage(
     return out, summary
 
 
+def simulate_predicted_best_hours_arbitrage(
+    df: pd.DataFrame,
+    battery_config: BatteryConfig | None = None,
+    best_hours_config: BestHoursConfig | None = None,
+    time_col: str = "HourUTC",
+    actual_col: str = "Actual_Price",
+    forecast_col: str = "Prediction",
+) -> tuple[pd.DataFrame, dict[str, float]]:
+    battery = battery_config or BatteryConfig()
+    cfg = best_hours_config or BestHoursConfig()
+    required = [time_col, actual_col, forecast_col]
+    missing = [column for column in required if column not in df.columns]
+    if missing:
+        raise KeyError(f"Missing required columns for predicted-best-hours simulation: {missing}")
+    if cfg.hours_per_day < 1:
+        raise ValueError("hours_per_day must be a positive integer.")
+    if cfg.min_profit_dkk_per_mwh < 0:
+        raise ValueError("min_profit_dkk_per_mwh must be non-negative.")
+
+    sim = df[required].copy()
+    sim[time_col] = pd.to_datetime(sim[time_col], utc=True)
+    sim = sim.sort_values(time_col).reset_index(drop=True)
+    market_time = sim[time_col].dt.tz_convert(cfg.market_timezone)
+    sim["Trade_Date"] = market_time.dt.date
+    sim["Market_Hour_Key"] = market_time.dt.strftime("%Y-%m-%dT%H%z")
+    hourly = (
+        sim.groupby(["Trade_Date", "Market_Hour_Key"], sort=False)
+        .agg(Hour_Start=(time_col, "min"), Forecast_Hourly=(forecast_col, "mean"))
+        .reset_index()
+    )
+
+    sim["Requested_Action"] = "hold"
+    sim["Predicted_Paper_Margin_DKK_MWh"] = np.nan
+    round_trip_efficiency = battery.charge_efficiency * battery.discharge_efficiency
+    charge_fee = battery.fee_per_mwh + battery.charge_fee_per_mwh
+    discharge_fee = battery.fee_per_mwh + battery.discharge_fee_per_mwh
+    selected_margins: list[float] = []
+
+    for _, day_hours in hourly.groupby("Trade_Date", sort=False):
+        candidates: list[tuple[float, str, str]] = []
+        records = day_hours.to_dict(orient="records")
+        for buy in records:
+            for sell in records:
+                if buy["Hour_Start"] >= sell["Hour_Start"]:
+                    continue
+                paper_margin = (
+                    round_trip_efficiency * (float(sell["Forecast_Hourly"]) - discharge_fee)
+                    - (float(buy["Forecast_Hourly"]) + charge_fee)
+                )
+                if paper_margin > cfg.min_profit_dkk_per_mwh:
+                    candidates.append(
+                        (paper_margin, str(buy["Market_Hour_Key"]), str(sell["Market_Hour_Key"]))
+                    )
+
+        used_hours: set[str] = set()
+        selected_pairs = 0
+        for paper_margin, buy_hour, sell_hour in sorted(candidates, reverse=True):
+            if buy_hour in used_hours or sell_hour in used_hours:
+                continue
+            buy_mask = sim["Market_Hour_Key"] == buy_hour
+            sell_mask = sim["Market_Hour_Key"] == sell_hour
+            sim.loc[buy_mask, "Requested_Action"] = "charge"
+            sim.loc[sell_mask, "Requested_Action"] = "discharge"
+            sim.loc[buy_mask | sell_mask, "Predicted_Paper_Margin_DKK_MWh"] = paper_margin
+            used_hours.update([buy_hour, sell_hour])
+            selected_margins.append(float(paper_margin))
+            selected_pairs += 1
+            if selected_pairs >= cfg.hours_per_day:
+                break
+
+    sim = sim.drop(columns=["Market_Hour_Key"]).rename(columns={forecast_col: "Forecast_Price"})
+    out, summary = _simulate_battery_dispatch(sim, battery, time_col, actual_col, "Requested_Action")
+    summary.update(
+        {
+            "hours_per_day": int(cfg.hours_per_day),
+            "min_profit_dkk_per_mwh": float(cfg.min_profit_dkk_per_mwh),
+            "profitable_hour_pairs": int(len(selected_margins)),
+            "average_predicted_paper_margin": (
+                float(np.mean(selected_margins)) if selected_margins else float("nan")
+            ),
+        }
+    )
+    return out, summary
+
+
+def _plan_daily_dispatch_dynamic_program(
+    sim: pd.DataFrame,
+    battery: BatteryConfig,
+    config: RollingOptimizerConfig,
+    time_col: str,
+    buy_price_col: str,
+    sell_price_col: str,
+    charge_allowed_col: str | None = None,
+    discharge_allowed_col: str | None = None,
+    degradation_cost_per_mwh: float = 0.0,
+) -> tuple[pd.Series, pd.Series, float]:
+    if battery.capacity_mwh <= 0 or battery.power_mw <= 0:
+        raise ValueError("Battery capacity and power must be positive.")
+    if config.soc_steps < 4:
+        raise ValueError("soc_steps must be at least 4.")
+    if not 0 <= config.terminal_soc_mwh <= battery.capacity_mwh:
+        raise ValueError("terminal_soc_mwh must be within the battery capacity.")
+
+    actions = pd.Series("hold", index=sim.index, dtype="object")
+    requested_power = pd.Series(0.0, index=sim.index, dtype="float64")
+    market_dates = pd.to_datetime(sim[time_col], utc=True).dt.tz_convert(
+        config.market_timezone
+    ).dt.date
+    step_hours = _infer_step_hours(sim[time_col])
+    max_grid_energy = battery.power_mw * step_hours
+    total_predicted_value = 0.0
+    start_soc = float(battery.initial_soc_mwh)
+
+    for _, day in sim.groupby(market_dates, sort=False):
+        states = np.unique(
+            np.concatenate(
+                [
+                    np.linspace(0.0, battery.capacity_mwh, config.soc_steps + 1),
+                    [start_soc, config.terminal_soc_mwh],
+                ]
+            )
+        )
+        state_count = len(states)
+        start_index = int(np.argmin(np.abs(states - start_soc)))
+        terminal_index = int(np.argmin(np.abs(states - config.terminal_soc_mwh)))
+        values = np.full(state_count, -np.inf)
+        values[start_index] = 0.0
+        predecessors = np.full((len(day), state_count), -1, dtype=int)
+        transition_power = np.zeros((len(day), state_count), dtype=float)
+        transition_action = np.full((len(day), state_count), "hold", dtype=object)
+
+        for step, (_, row) in enumerate(day.iterrows()):
+            next_values = np.full(state_count, -np.inf)
+            can_charge = (
+                True if charge_allowed_col is None else bool(row[charge_allowed_col])
+            )
+            can_discharge = (
+                True if discharge_allowed_col is None else bool(row[discharge_allowed_col])
+            )
+            buy_price = float(row[buy_price_col])
+            sell_price = float(row[sell_price_col])
+            for source_index, source_soc in enumerate(states):
+                if not np.isfinite(values[source_index]):
+                    continue
+                for destination_index, destination_soc in enumerate(states):
+                    soc_change = float(destination_soc - source_soc)
+                    action = "hold"
+                    power_mw = 0.0
+                    predicted_cashflow = 0.0
+                    if soc_change > 1e-9:
+                        if not can_charge:
+                            continue
+                        grid_energy = soc_change / battery.charge_efficiency
+                        if grid_energy > max_grid_energy + 1e-9:
+                            continue
+                        action = "charge"
+                        power_mw = grid_energy / step_hours
+                        predicted_cashflow = -grid_energy * (
+                            buy_price
+                            + battery.fee_per_mwh
+                            + battery.charge_fee_per_mwh
+                            + degradation_cost_per_mwh
+                        )
+                    elif soc_change < -1e-9:
+                        if not can_discharge:
+                            continue
+                        grid_energy = -soc_change * battery.discharge_efficiency
+                        if grid_energy > max_grid_energy + 1e-9:
+                            continue
+                        action = "discharge"
+                        power_mw = grid_energy / step_hours
+                        predicted_cashflow = grid_energy * (
+                            sell_price
+                            - battery.fee_per_mwh
+                            - battery.discharge_fee_per_mwh
+                            - degradation_cost_per_mwh
+                        )
+                    candidate = values[source_index] + predicted_cashflow
+                    if candidate > next_values[destination_index] + 1e-9:
+                        next_values[destination_index] = candidate
+                        predecessors[step, destination_index] = source_index
+                        transition_power[step, destination_index] = power_mw
+                        transition_action[step, destination_index] = action
+            values = next_values
+
+        destination_index = terminal_index
+        if not np.isfinite(values[destination_index]):
+            feasible = np.flatnonzero(np.isfinite(values))
+            if len(feasible) == 0:
+                raise ValueError("No feasible dynamic-program path was found.")
+            distance = np.abs(states[feasible] - config.terminal_soc_mwh)
+            closest = feasible[distance == distance.min()]
+            destination_index = int(closest[np.argmax(values[closest])])
+        total_predicted_value += float(values[destination_index])
+        selected_end_soc = float(states[destination_index])
+        day_indices = list(day.index)
+        for step in range(len(day_indices) - 1, -1, -1):
+            source_index = int(predecessors[step, destination_index])
+            if source_index < 0:
+                raise ValueError("Dynamic-program path reconstruction failed.")
+            row_index = day_indices[step]
+            actions.loc[row_index] = str(transition_action[step, destination_index])
+            requested_power.loc[row_index] = float(transition_power[step, destination_index])
+            destination_index = source_index
+        start_soc = selected_end_soc
+
+    return actions, requested_power, total_predicted_value
+
+
+def simulate_rolling_price_optimizer(
+    df: pd.DataFrame,
+    battery_config: BatteryConfig | None = None,
+    optimizer_config: RollingOptimizerConfig | None = None,
+    time_col: str = "HourUTC",
+    actual_col: str = "Actual_Price",
+    forecast_col: str = "Prediction",
+) -> tuple[pd.DataFrame, dict[str, float]]:
+    battery = battery_config or BatteryConfig()
+    cfg = optimizer_config or RollingOptimizerConfig()
+    required = [time_col, actual_col, forecast_col]
+    missing = [column for column in required if column not in df.columns]
+    if missing:
+        raise KeyError(f"Missing required columns for rolling optimizer: {missing}")
+    sim = df[required].copy()
+    sim[time_col] = pd.to_datetime(sim[time_col], utc=True)
+    sim = sim.sort_values(time_col).reset_index(drop=True)
+    actions, power, predicted_value = _plan_daily_dispatch_dynamic_program(
+        sim, battery, cfg, time_col, forecast_col, forecast_col
+    )
+    sim["Requested_Action"] = actions
+    sim["Requested_Power_MW"] = power
+    sim = sim.rename(columns={forecast_col: "Forecast_Price"})
+    out, summary = _simulate_battery_dispatch(
+        sim, battery, time_col, actual_col, "Requested_Action"
+    )
+    summary.update(
+        {
+            "soc_steps": int(cfg.soc_steps),
+            "terminal_soc_mwh": float(cfg.terminal_soc_mwh),
+            "predicted_optimizer_value": float(predicted_value),
+        }
+    )
+    return out, summary
+
+
+def simulate_degradation_aware_optimizer(
+    df: pd.DataFrame,
+    battery_config: BatteryConfig | None = None,
+    optimizer_config: DegradationOptimizerConfig | None = None,
+    time_col: str = "HourUTC",
+    actual_col: str = "Actual_Price",
+    forecast_col: str = "Prediction",
+) -> tuple[pd.DataFrame, dict[str, float]]:
+    battery = battery_config or BatteryConfig()
+    cfg = optimizer_config or DegradationOptimizerConfig()
+    base_cfg = RollingOptimizerConfig(
+        soc_steps=cfg.soc_steps,
+        terminal_soc_mwh=cfg.terminal_soc_mwh,
+        market_timezone=cfg.market_timezone,
+    )
+    required = [time_col, actual_col, forecast_col]
+    missing = [column for column in required if column not in df.columns]
+    if missing:
+        raise KeyError(f"Missing required columns for degradation optimizer: {missing}")
+    sim = df[required].copy()
+    sim[time_col] = pd.to_datetime(sim[time_col], utc=True)
+    sim = sim.sort_values(time_col).reset_index(drop=True)
+    actions, power, predicted_value = _plan_daily_dispatch_dynamic_program(
+        sim,
+        battery,
+        base_cfg,
+        time_col,
+        forecast_col,
+        forecast_col,
+        degradation_cost_per_mwh=cfg.degradation_cost_per_mwh,
+    )
+    sim["Requested_Action"] = actions
+    sim["Requested_Power_MW"] = power
+    sim = sim.rename(columns={forecast_col: "Forecast_Price"})
+    out, summary = _simulate_battery_dispatch(
+        sim,
+        battery,
+        time_col,
+        actual_col,
+        "Requested_Action",
+        degradation_cost_per_mwh=cfg.degradation_cost_per_mwh,
+    )
+    summary.update(
+        {
+            "soc_steps": int(cfg.soc_steps),
+            "terminal_soc_mwh": float(cfg.terminal_soc_mwh),
+            "degradation_cost_per_mwh": float(cfg.degradation_cost_per_mwh),
+            "predicted_optimizer_value": float(predicted_value),
+        }
+    )
+    return out, summary
+
+
+def simulate_uncertainty_aware_optimizer(
+    df: pd.DataFrame,
+    battery_config: BatteryConfig | None = None,
+    optimizer_config: UncertaintyOptimizerConfig | None = None,
+    time_col: str = "HourUTC",
+    actual_col: str = "Actual_Price",
+    forecast_col: str = "Prediction",
+) -> tuple[pd.DataFrame, dict[str, float]]:
+    battery = battery_config or BatteryConfig()
+    cfg = optimizer_config or UncertaintyOptimizerConfig()
+    if cfg.uncertainty_penalty < 0:
+        raise ValueError("uncertainty_penalty must be non-negative.")
+    if cfg.max_model_spread is not None and cfg.max_model_spread < 0:
+        raise ValueError("max_model_spread must be non-negative or None.")
+    model_columns = list(
+        dict.fromkeys(
+            column
+            for column in [forecast_col, "Hourly_Baseline", "Direct_15min_Prediction"]
+            if column in df.columns
+        )
+    )
+    required = [time_col, actual_col, forecast_col, *model_columns]
+    missing = [column for column in required if column not in df.columns]
+    if missing:
+        raise KeyError(f"Missing required columns for uncertainty optimizer: {missing}")
+    sim = df[list(dict.fromkeys(required))].copy()
+    sim[time_col] = pd.to_datetime(sim[time_col], utc=True)
+    sim = sim.sort_values(time_col).reset_index(drop=True)
+    model_values = sim[model_columns].astype(float)
+    sim["Model_Uncertainty_Std"] = model_values.std(axis=1, ddof=0)
+    sim["Model_Spread"] = model_values.max(axis=1) - model_values.min(axis=1)
+    sim["Conservative_Buy_Price"] = (
+        sim[forecast_col] + cfg.uncertainty_penalty * sim["Model_Uncertainty_Std"]
+    )
+    sim["Conservative_Sell_Price"] = (
+        sim[forecast_col] - cfg.uncertainty_penalty * sim["Model_Uncertainty_Std"]
+    )
+    sim["Uncertainty_Trade_Allowed"] = (
+        True if cfg.max_model_spread is None else sim["Model_Spread"] <= cfg.max_model_spread
+    )
+    base_cfg = RollingOptimizerConfig(
+        soc_steps=cfg.soc_steps,
+        terminal_soc_mwh=cfg.terminal_soc_mwh,
+        market_timezone=cfg.market_timezone,
+    )
+    actions, power, predicted_value = _plan_daily_dispatch_dynamic_program(
+        sim,
+        battery,
+        base_cfg,
+        time_col,
+        "Conservative_Buy_Price",
+        "Conservative_Sell_Price",
+        "Uncertainty_Trade_Allowed",
+        "Uncertainty_Trade_Allowed",
+    )
+    sim["Requested_Action"] = actions
+    sim["Requested_Power_MW"] = power
+    sim = sim.rename(columns={forecast_col: "Forecast_Price"})
+    out, summary = _simulate_battery_dispatch(
+        sim, battery, time_col, actual_col, "Requested_Action"
+    )
+    summary.update(
+        {
+            "uncertainty_penalty": float(cfg.uncertainty_penalty),
+            "max_model_spread": (
+                float(cfg.max_model_spread) if cfg.max_model_spread is not None else None
+            ),
+            "model_count": int(len(model_columns)),
+            "average_model_spread": float(sim["Model_Spread"].mean()),
+            "predicted_optimizer_value": float(predicted_value),
+        }
+    )
+    return out, summary
+
+
+def _wind_hourly_signals(
+    sim: pd.DataFrame,
+    cfg: WindSignalConfig | WindConfirmedOptimizerConfig,
+    time_col: str,
+    wind_col: str,
+) -> pd.DataFrame:
+    if not 0 <= cfg.low_wind_quantile < cfg.high_wind_quantile <= 1:
+        raise ValueError("Wind quantiles must satisfy 0 <= low < high <= 1.")
+    if cfg.ramp_threshold_mw < 0:
+        raise ValueError("ramp_threshold_mw must be non-negative.")
+    market_time = pd.to_datetime(sim[time_col], utc=True).dt.tz_convert(cfg.market_timezone)
+    keys = market_time.dt.strftime("%Y-%m-%dT%H%z")
+    hourly = pd.DataFrame(
+        {
+            "Market_Hour_Key": keys,
+            "Trade_Date": market_time.dt.date,
+            "HourUTC": pd.to_datetime(sim[time_col], utc=True),
+            "Wind_DayAhead_MW": sim[wind_col].astype(float),
+        }
+    ).groupby(["Market_Hour_Key", "Trade_Date"], sort=False, as_index=False).agg(
+        HourUTC=("HourUTC", "min"), Wind_DayAhead_MW=("Wind_DayAhead_MW", "mean")
+    )
+    daily_wind = hourly.groupby("Trade_Date")["Wind_DayAhead_MW"]
+    hourly["Wind_Rank_Pct"] = daily_wind.rank(method="average", pct=True)
+    hourly["Wind_Ramp_MW"] = daily_wind.diff().fillna(0.0)
+    # A zero threshold disables ramp confirmation. Treating zero as a literal
+    # comparison would make a flat ramp satisfy charge and discharge together.
+    ramp_enabled = cfg.ramp_threshold_mw > 0
+    hourly["Wind_Charge_Signal"] = (
+        hourly["Wind_Rank_Pct"] >= cfg.high_wind_quantile
+    )
+    hourly["Wind_Discharge_Signal"] = (
+        hourly["Wind_Rank_Pct"] <= cfg.low_wind_quantile
+    )
+    if ramp_enabled:
+        hourly["Wind_Charge_Signal"] |= (
+            hourly["Wind_Ramp_MW"] >= cfg.ramp_threshold_mw
+        )
+        hourly["Wind_Discharge_Signal"] |= (
+            hourly["Wind_Ramp_MW"] <= -cfg.ramp_threshold_mw
+        )
+    return hourly
+
+
+def simulate_wind_signal_arbitrage(
+    df: pd.DataFrame,
+    battery_config: BatteryConfig | None = None,
+    wind_config: WindSignalConfig | None = None,
+    time_col: str = "HourUTC",
+    actual_col: str = "Actual_Price",
+    forecast_col: str = "Prediction",
+    wind_col: str = "Wind_Total_DayAhead_MW",
+) -> tuple[pd.DataFrame, dict[str, float]]:
+    battery = battery_config or BatteryConfig()
+    cfg = wind_config or WindSignalConfig()
+    required = [time_col, actual_col, forecast_col, wind_col]
+    missing = [column for column in required if column not in df.columns]
+    if missing:
+        raise KeyError(f"Missing required columns for wind-signal simulation: {missing}")
+    sim = df[required].copy()
+    sim[time_col] = pd.to_datetime(sim[time_col], utc=True)
+    sim = sim.sort_values(time_col).reset_index(drop=True)
+    market_time = sim[time_col].dt.tz_convert(cfg.market_timezone)
+    sim["Market_Hour_Key"] = market_time.dt.strftime("%Y-%m-%dT%H%z")
+    hourly = _wind_hourly_signals(sim, cfg, time_col, wind_col)
+    sim = sim.merge(
+        hourly[
+            [
+                "Market_Hour_Key",
+                "Wind_Rank_Pct",
+                "Wind_Ramp_MW",
+                "Wind_Charge_Signal",
+                "Wind_Discharge_Signal",
+            ]
+        ],
+        on="Market_Hour_Key",
+        how="left",
+        validate="many_to_one",
+    )
+    sim["Requested_Action"] = np.where(
+        sim["Wind_Charge_Signal"],
+        "charge",
+        np.where(sim["Wind_Discharge_Signal"], "discharge", "hold"),
+    )
+    sim = sim.rename(columns={forecast_col: "Forecast_Price"})
+    out, summary = _simulate_battery_dispatch(
+        sim, battery, time_col, actual_col, "Requested_Action"
+    )
+    summary.update(
+        {
+            "low_wind_quantile": float(cfg.low_wind_quantile),
+            "high_wind_quantile": float(cfg.high_wind_quantile),
+            "ramp_threshold_mw": float(cfg.ramp_threshold_mw),
+            "average_wind_day_ahead_mw": float(sim[wind_col].mean()),
+        }
+    )
+    return out, summary
+
+
+def simulate_wind_confirmed_optimizer(
+    df: pd.DataFrame,
+    battery_config: BatteryConfig | None = None,
+    optimizer_config: WindConfirmedOptimizerConfig | None = None,
+    time_col: str = "HourUTC",
+    actual_col: str = "Actual_Price",
+    forecast_col: str = "Prediction",
+    wind_col: str = "Wind_Total_DayAhead_MW",
+) -> tuple[pd.DataFrame, dict[str, float]]:
+    battery = battery_config or BatteryConfig()
+    cfg = optimizer_config or WindConfirmedOptimizerConfig()
+    required = [time_col, actual_col, forecast_col, wind_col]
+    missing = [column for column in required if column not in df.columns]
+    if missing:
+        raise KeyError(f"Missing required columns for wind-confirmed optimizer: {missing}")
+    sim = df[required].copy()
+    sim[time_col] = pd.to_datetime(sim[time_col], utc=True)
+    sim = sim.sort_values(time_col).reset_index(drop=True)
+    market_time = sim[time_col].dt.tz_convert(cfg.market_timezone)
+    sim["Market_Hour_Key"] = market_time.dt.strftime("%Y-%m-%dT%H%z")
+    hourly = _wind_hourly_signals(sim, cfg, time_col, wind_col)
+    sim = sim.merge(
+        hourly[["Market_Hour_Key", "Wind_Charge_Signal", "Wind_Discharge_Signal"]],
+        on="Market_Hour_Key",
+        how="left",
+        validate="many_to_one",
+    )
+    base_cfg = RollingOptimizerConfig(
+        soc_steps=cfg.soc_steps,
+        terminal_soc_mwh=cfg.terminal_soc_mwh,
+        market_timezone=cfg.market_timezone,
+    )
+    actions, power, predicted_value = _plan_daily_dispatch_dynamic_program(
+        sim,
+        battery,
+        base_cfg,
+        time_col,
+        forecast_col,
+        forecast_col,
+        "Wind_Charge_Signal",
+        "Wind_Discharge_Signal",
+    )
+    sim["Requested_Action"] = actions
+    sim["Requested_Power_MW"] = power
+    sim = sim.rename(columns={forecast_col: "Forecast_Price"})
+    out, summary = _simulate_battery_dispatch(
+        sim, battery, time_col, actual_col, "Requested_Action"
+    )
+    summary.update(
+        {
+            "low_wind_quantile": float(cfg.low_wind_quantile),
+            "high_wind_quantile": float(cfg.high_wind_quantile),
+            "ramp_threshold_mw": float(cfg.ramp_threshold_mw),
+            "predicted_optimizer_value": float(predicted_value),
+        }
+    )
+    return out, summary
+
+
+def simulate_perfect_foresight_oracle(
+    df: pd.DataFrame,
+    battery_config: BatteryConfig | None = None,
+    optimizer_config: RollingOptimizerConfig | None = None,
+    time_col: str = "HourUTC",
+    actual_col: str = "Actual_Price",
+    forecast_col: str = "Prediction",
+) -> tuple[pd.DataFrame, dict[str, float]]:
+    battery = battery_config or BatteryConfig()
+    cfg = optimizer_config or RollingOptimizerConfig()
+    required = [time_col, actual_col, forecast_col]
+    missing = [column for column in required if column not in df.columns]
+    if missing:
+        raise KeyError(f"Missing required columns for perfect-foresight oracle: {missing}")
+    sim = df[required].copy()
+    sim[time_col] = pd.to_datetime(sim[time_col], utc=True)
+    sim = sim.sort_values(time_col).reset_index(drop=True)
+    actions, power, predicted_value = _plan_daily_dispatch_dynamic_program(
+        sim, battery, cfg, time_col, actual_col, actual_col
+    )
+    sim["Requested_Action"] = actions
+    sim["Requested_Power_MW"] = power
+    sim = sim.rename(columns={forecast_col: "Forecast_Price"})
+    out, summary = _simulate_battery_dispatch(
+        sim, battery, time_col, actual_col, "Requested_Action"
+    )
+    summary.update(
+        {
+            "soc_steps": int(cfg.soc_steps),
+            "terminal_soc_mwh": float(cfg.terminal_soc_mwh),
+            "predicted_optimizer_value": float(predicted_value),
+            "is_hindsight_benchmark": True,
+        }
+    )
+    return out, summary
+
+
 def simulate_momentum_spread_arbitrage(
     df: pd.DataFrame,
     battery_config: BatteryConfig | None = None,
@@ -916,15 +1590,21 @@ def run_strategy_suite(
     mean_reversion_config: MeanReversionConfig | None = None,
     breakout_config: ChannelBreakoutConfig | None = None,
     daily_spread_config: DailySpreadConfig | None = None,
+    best_hours_config: BestHoursConfig | None = None,
     momentum_config: MomentumConfig | None = None,
     momentum_spread_config: MomentumSpreadConfig | None = None,
     ensemble_agreement_config: EnsembleAgreementConfig | None = None,
+    rolling_optimizer_config: RollingOptimizerConfig | None = None,
+    uncertainty_optimizer_config: UncertaintyOptimizerConfig | None = None,
+    degradation_optimizer_config: DegradationOptimizerConfig | None = None,
+    wind_signal_config: WindSignalConfig | None = None,
+    wind_confirmed_optimizer_config: WindConfirmedOptimizerConfig | None = None,
     time_col: str = "HourUTC",
     actual_col: str = "Actual_Price",
     forecast_col: str = "Prediction",
 ) -> dict[str, tuple[pd.DataFrame, dict[str, float]]]:
     battery = battery_config or BatteryConfig()
-    return {
+    suite = {
         "Forecast quantile": simulate_battery_arbitrage(df, battery, time_col, actual_col, forecast_col),
         "Weekly average band": simulate_weekly_average_band_arbitrage(
             df, battery, weekly_band_config, time_col, actual_col, forecast_col
@@ -937,6 +1617,9 @@ def run_strategy_suite(
         ),
         "Daily spread rank": simulate_daily_spread_rank_arbitrage(
             df, battery, daily_spread_config, time_col, actual_col, forecast_col
+        ),
+        "Predicted best hours": simulate_predicted_best_hours_arbitrage(
+            df, battery, best_hours_config, time_col, actual_col, forecast_col
         ),
         "Ensemble agreement": simulate_ensemble_agreement_arbitrage(
             df, battery, ensemble_agreement_config, time_col, actual_col, forecast_col
@@ -953,4 +1636,21 @@ def run_strategy_suite(
         "Channel breakout": simulate_channel_breakout_arbitrage(
             df, battery, breakout_config, time_col, actual_col, forecast_col
         ),
+        "Rolling price optimizer": simulate_rolling_price_optimizer(
+            df, battery, rolling_optimizer_config, time_col, actual_col, forecast_col
+        ),
+        "Uncertainty-aware optimizer": simulate_uncertainty_aware_optimizer(
+            df, battery, uncertainty_optimizer_config, time_col, actual_col, forecast_col
+        ),
+        "Degradation-aware optimizer": simulate_degradation_aware_optimizer(
+            df, battery, degradation_optimizer_config, time_col, actual_col, forecast_col
+        ),
     }
+    if "Wind_Total_DayAhead_MW" in df.columns:
+        suite["Wind signal"] = simulate_wind_signal_arbitrage(
+            df, battery, wind_signal_config, time_col, actual_col, forecast_col
+        )
+        suite["Wind-confirmed optimizer"] = simulate_wind_confirmed_optimizer(
+            df, battery, wind_confirmed_optimizer_config, time_col, actual_col, forecast_col
+        )
+    return suite

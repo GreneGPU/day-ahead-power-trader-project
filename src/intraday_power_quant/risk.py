@@ -31,7 +31,11 @@ def max_drawdown_duration(cumulative_cashflow: pd.Series) -> int:
     return int(longest)
 
 
-def summarize_cashflow_risk(sim: pd.DataFrame, time_col: str = "HourUTC") -> dict[str, float]:
+def summarize_cashflow_risk(
+    sim: pd.DataFrame,
+    time_col: str = "HourUTC",
+    market_timezone: str = "Europe/Copenhagen",
+) -> dict[str, float]:
     if sim.empty or "Cashflow" not in sim.columns:
         return {
             "win_rate": float("nan"),
@@ -63,14 +67,16 @@ def summarize_cashflow_risk(sim: pd.DataFrame, time_col: str = "HourUTC") -> dic
     downside = cashflow[cashflow < 0]
 
     if time_col in sim.columns:
-        dates = pd.to_datetime(sim[time_col]).dt.date
+        dates = pd.to_datetime(sim[time_col], utc=True).dt.tz_convert(market_timezone).dt.date
         daily_cashflow = cashflow.groupby(dates).sum()
     else:
         daily_cashflow = pd.Series([total])
     daily_mean = float(daily_cashflow.mean())
-    daily_std = float(daily_cashflow.std(ddof=0))
+    daily_std = float(daily_cashflow.std(ddof=1)) if len(daily_cashflow) > 1 else float("nan")
     daily_downside = daily_cashflow[daily_cashflow < 0]
-    daily_downside_std = float(daily_downside.std(ddof=0)) if not daily_downside.empty else 0.0
+    daily_downside_std = (
+        float(daily_downside.std(ddof=1)) if len(daily_downside) > 1 else float("nan")
+    )
     annual_scale = math.sqrt(365)
 
     return {

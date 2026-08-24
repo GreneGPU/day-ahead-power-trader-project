@@ -7,6 +7,7 @@ __pycache__/
 *.egg-info/
 build/
 dist/
+.vercel/
 catboost_info/
 configs/jakob-local.json
 data/raw/*
@@ -18,3 +19,4 @@ outputs/*
 reports/*
 !reports/.gitkeep
 !reports/README.md
+.vercel

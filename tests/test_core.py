@@ -1,4 +1,5 @@
 from pathlib import Path
+import math
 import sys
 
 import pandas as pd
@@ -18,26 +19,34 @@ from intraday_power_quant.research import (
 )
 from intraday_power_quant.trading import (
     BatteryConfig,
+    BestHoursConfig,
     ChannelBreakoutConfig,
     DailySpreadConfig,
+    DegradationOptimizerConfig,
     EnsembleAgreementConfig,
     ForecastEdgeConfig,
     MeanReversionConfig,
     MomentumConfig,
     MomentumSpreadConfig,
+    RollingOptimizerConfig,
     VolatilityFilterConfig,
     WeeklyBandConfig,
     run_strategy_suite,
     simulate_battery_arbitrage,
     simulate_channel_breakout_arbitrage,
     simulate_daily_spread_rank_arbitrage,
+    simulate_degradation_aware_optimizer,
     simulate_ensemble_agreement_arbitrage,
     simulate_forecast_edge_arbitrage,
     simulate_mean_reversion_arbitrage,
     simulate_momentum_arbitrage,
     simulate_momentum_spread_arbitrage,
+    simulate_predicted_best_hours_arbitrage,
+    simulate_perfect_foresight_oracle,
+    simulate_rolling_price_optimizer,
     simulate_volatility_filtered_average_arbitrage,
     simulate_weekly_average_band_arbitrage,
+    simulate_wind_signal_arbitrage,
 )
 from intraday_power_quant.validation import make_train_test_split_mask
 
@@ -60,6 +69,37 @@ def test_battery_simulation_returns_one_row_per_interval():
     sim, summary = simulate_battery_arbitrage(frame, BatteryConfig(capacity_mwh=10, power_mw=5))
     assert len(sim) == 8
     assert summary["trades"] > 0
+
+
+def test_battery_defaults_to_empty_initial_state_of_charge():
+    assert BatteryConfig().initial_soc_mwh == 0
+
+
+def test_battery_simulation_applies_round_trip_efficiency_and_directional_fees():
+    one_way_efficiency = math.sqrt(0.90)
+    frame = pd.DataFrame(
+        {
+            "HourUTC": pd.date_range("2026-01-01", periods=2, freq="1h"),
+            "Actual_Price": [10.0, 100.0],
+            "Prediction": [10.0, 100.0],
+        }
+    )
+    _, summary = simulate_battery_arbitrage(
+        frame,
+        BatteryConfig(
+            capacity_mwh=10,
+            power_mw=10,
+            initial_soc_mwh=0,
+            charge_efficiency=one_way_efficiency,
+            discharge_efficiency=one_way_efficiency,
+            charge_fee_per_mwh=115.41,
+            discharge_fee_per_mwh=10.71,
+        ),
+    )
+    assert math.isclose(summary["round_trip_efficiency"], 0.90)
+    assert math.isclose(summary["energy_charged_mwh"], 10.0)
+    assert math.isclose(summary["energy_discharged_mwh"], 9.0)
+    assert math.isclose(summary["total_fee_cost"], 1250.49)
 
 
 def test_weekly_average_band_strategy_adds_thresholds():
@@ -87,6 +127,8 @@ def test_strategy_suite_contains_common_strategy_families():
             "Actual_Price": list(range(32)),
             "Prediction": list(range(16)) + list(range(16, 0, -1)),
             "Hourly_Baseline": [16] * 32,
+            "Direct_15min_Prediction": list(range(16)) + list(range(16, 0, -1)),
+            "Wind_Total_DayAhead_MW": [500, 750, 1000, 1500, 2000, 2500, 1800, 1200] * 4,
         }
     )
     suite = run_strategy_suite(
@@ -108,6 +150,12 @@ def test_strategy_suite_contains_common_strategy_families():
         "Momentum spread",
         "Channel breakout",
         "Daily spread rank",
+        "Predicted best hours",
+        "Rolling price optimizer",
+        "Uncertainty-aware optimizer",
+        "Degradation-aware optimizer",
+        "Wind signal",
+        "Wind-confirmed optimizer",
     }
     assert "Forecast_Z" in simulate_mean_reversion_arbitrage(frame)[0].columns
     assert "Forecast_Momentum_DKK" in simulate_momentum_arbitrage(frame)[0].columns
@@ -117,6 +165,117 @@ def test_strategy_suite_contains_common_strategy_families():
     assert "Agreement_Charge_Share" in simulate_ensemble_agreement_arbitrage(frame)[0].columns
     assert "Rolling_Low_Forecast" in simulate_channel_breakout_arbitrage(frame)[0].columns
     assert "Daily_Forecast_Rank" in simulate_daily_spread_rank_arbitrage(frame)[0].columns
+
+
+def test_predicted_best_hours_only_trades_profitable_buy_before_sell_pairs():
+    forecast = [10.0] * 4 + [40.0] * 4 + [100.0] * 4
+    frame = pd.DataFrame(
+        {
+            "HourUTC": pd.date_range("2026-01-01", periods=12, freq="15min", tz="UTC"),
+            "Actual_Price": forecast,
+            "Prediction": forecast,
+        }
+    )
+    sim, summary = simulate_predicted_best_hours_arbitrage(
+        frame,
+        BatteryConfig(
+            capacity_mwh=25,
+            power_mw=25,
+            initial_soc_mwh=0,
+            charge_efficiency=1,
+            discharge_efficiency=1,
+            charge_fee_per_mwh=5,
+            discharge_fee_per_mwh=5,
+        ),
+        BestHoursConfig(hours_per_day=1),
+    )
+    assert summary["profitable_hour_pairs"] == 1
+    assert summary["charge_intervals"] == 4
+    assert summary["discharge_intervals"] == 4
+    assert summary["total_cashflow"] == 2000
+    assert sim.loc[sim["Action"] == "charge", "HourUTC"].max() < sim.loc[
+        sim["Action"] == "discharge", "HourUTC"
+    ].min()
+
+
+def test_predicted_best_hours_stays_idle_when_fees_remove_paper_profit():
+    frame = pd.DataFrame(
+        {
+            "HourUTC": pd.date_range("2026-01-01", periods=8, freq="15min", tz="UTC"),
+            "Actual_Price": [50.0] * 4 + [55.0] * 4,
+            "Prediction": [50.0] * 4 + [55.0] * 4,
+        }
+    )
+    _, summary = simulate_predicted_best_hours_arbitrage(
+        frame,
+        BatteryConfig(charge_fee_per_mwh=10, discharge_fee_per_mwh=10),
+        BestHoursConfig(hours_per_day=1),
+    )
+    assert summary["trades"] == 0
+
+
+def test_dynamic_optimizer_finishes_empty_and_oracle_is_an_upper_bound():
+    frame = pd.DataFrame(
+        {
+            "HourUTC": pd.date_range("2026-01-01", periods=12, freq="1h", tz="UTC"),
+            "Actual_Price": [25, 20, 15, 10, 30, 60, 100, 80, 45, 30, 20, 15],
+            "Prediction": [30, 28, 26, 24, 35, 45, 55, 50, 40, 32, 28, 25],
+        }
+    )
+    battery = BatteryConfig(
+        capacity_mwh=10,
+        power_mw=5,
+        initial_soc_mwh=0,
+        charge_efficiency=1,
+        discharge_efficiency=1,
+    )
+    optimized_sim, optimized_summary = simulate_rolling_price_optimizer(
+        frame, battery, RollingOptimizerConfig(soc_steps=20)
+    )
+    _, oracle_summary = simulate_perfect_foresight_oracle(
+        frame, battery, RollingOptimizerConfig(soc_steps=20)
+    )
+    assert optimized_summary["trades"] > 0
+    assert math.isclose(optimized_summary["final_soc_mwh"], 0)
+    assert math.isclose(optimized_sim.iloc[-1]["State_Of_Charge_MWh"], 0)
+    assert oracle_summary["total_cashflow"] >= optimized_summary["total_cashflow"]
+
+
+def test_degradation_optimizer_deducts_battery_wear_cost():
+    frame = pd.DataFrame(
+        {
+            "HourUTC": pd.date_range("2026-01-01", periods=8, freq="1h", tz="UTC"),
+            "Actual_Price": [0, 0, 10, 20, 100, 100, 20, 10],
+            "Prediction": [0, 0, 10, 20, 100, 100, 20, 10],
+        }
+    )
+    _, summary = simulate_degradation_aware_optimizer(
+        frame,
+        BatteryConfig(capacity_mwh=10, power_mw=5, charge_efficiency=1, discharge_efficiency=1),
+        DegradationOptimizerConfig(degradation_cost_per_mwh=10, soc_steps=20),
+    )
+    assert summary["trades"] > 0
+    assert summary["total_degradation_cost"] > 0
+    assert summary["total_cashflow"] == 800
+
+
+def test_wind_signal_uses_day_ahead_wind_feature():
+    wind = [100, 200, 500, 1000, 2000, 3000, 1500, 400]
+    frame = pd.DataFrame(
+        {
+            "HourUTC": pd.date_range("2026-01-01", periods=8, freq="1h", tz="UTC"),
+            "Actual_Price": [50] * 8,
+            "Prediction": [50] * 8,
+            "Wind_Total_DayAhead_MW": wind,
+        }
+    )
+    sim, summary = simulate_wind_signal_arbitrage(
+        frame,
+        BatteryConfig(capacity_mwh=10, power_mw=5, charge_efficiency=1, discharge_efficiency=1),
+    )
+    assert summary["trades"] > 0
+    assert "Wind_Ramp_MW" in sim.columns
+    assert set(sim.loc[sim["Action"] == "charge", "Wind_Total_DayAhead_MW"]) != set()
 
 
 def test_optimizer_returns_best_setting_per_strategy():
@@ -129,6 +288,8 @@ def test_optimizer_returns_best_setting_per_strategy():
             "TL_Residual_XGB": [18, 17, 15, 12, 25, 33, 59, 81, 74, 70] * 4,
             "TL_Residual_LGBM": [20, 16, 14, 14, 23, 31, 57, 83, 76, 68] * 4,
             "TL_Residual_CAT": [19, 18, 13, 13, 24, 32, 58, 82, 75, 69] * 4,
+            "Direct_15min_Prediction": [20, 17, 15, 12, 25, 31, 57, 81, 76, 70] * 4,
+            "Wind_Total_DayAhead_MW": [500, 750, 1000, 1500, 2000, 2500, 1800, 1200, 900, 600] * 4,
         }
     )
     sweep = run_strategy_parameter_sweep(frame, BatteryConfig(capacity_mwh=10, power_mw=5))
@@ -136,7 +297,7 @@ def test_optimizer_returns_best_setting_per_strategy():
     assert not sweep.empty
     assert set(["Rank", "Strategy", "Cashflow", "Evaluations", "Settings"]).issubset(optimized.columns)
     assert optimized["Strategy"].is_unique
-    assert len(optimized) == 10
+    assert len(optimized) == 16
     assert optimized.iloc[0]["Cashflow"] >= optimized.iloc[-1]["Cashflow"]
 
 

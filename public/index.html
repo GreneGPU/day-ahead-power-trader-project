@@ -1,0 +1,358 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Day-Ahead Power Trader</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg:#06101d; --panel:#0d1b2d; --panel2:#102238; --line:#213955;
+      --text:#edf5ff; --muted:#8ea5bf; --blue:#61adff; --green:#3fe09d;
+      --orange:#ffb55f; --red:#ff6b7a; --shadow:0 24px 80px rgba(0,0,0,.22);
+    }
+    * { box-sizing:border-box; }
+    body { margin:0; min-height:100vh; color:var(--text); background:radial-gradient(circle at 88% 0,#153b65 0,transparent 31%),var(--bg); font:14px/1.5 Inter,ui-sans-serif,system-ui,-apple-system,sans-serif; }
+    main { width:min(1240px,calc(100% - 32px)); margin:auto; padding:54px 0 72px; }
+    header { display:flex; align-items:flex-end; justify-content:space-between; gap:24px; margin-bottom:28px; }
+    .eyebrow { color:var(--green); font-size:11px; font-weight:850; letter-spacing:.17em; text-transform:uppercase; }
+    h1 { margin:8px 0 8px; font-size:clamp(35px,5vw,62px); line-height:1; letter-spacing:-.045em; }
+    .lede { margin:0; max-width:720px; color:var(--muted); font-size:16px; }
+    .api-link { flex:0 0 auto; color:var(--text); text-decoration:none; border:1px solid var(--line); border-radius:10px; padding:10px 14px; background:rgba(14,30,49,.7); }
+    .controls { display:grid; grid-template-columns:1.5fr 1.5fr 1fr repeat(3,.75fr); gap:12px; align-items:end; padding:18px; border:1px solid var(--line); border-radius:16px; background:rgba(11,27,45,.86); box-shadow:var(--shadow); }
+    .fee-control { grid-column:span 2; }
+    .controls button { grid-column:span 1; }
+    label { display:block; color:var(--muted); font-size:11px; font-weight:750; letter-spacing:.05em; text-transform:uppercase; }
+    select,input { width:100%; margin-top:6px; padding:10px 11px; border:1px solid var(--line); border-radius:9px; color:var(--text); background:#071421; font:inherit; outline:none; }
+    select:focus,input:focus { border-color:var(--blue); }
+    button { min-height:41px; border:0; border-radius:10px; padding:0 17px; background:var(--blue); color:#06101d; font:inherit; font-weight:850; cursor:pointer; }
+    button:disabled { opacity:.55; cursor:wait; }
+    .cost-note { margin:11px 3px 0; color:var(--muted); font-size:11px; }
+    .cost-note strong { color:var(--text); }
+    .cost-note a { color:var(--blue); }
+    .optimization-note { margin:13px 3px 0; padding:10px 12px; color:var(--muted); border-left:3px solid var(--blue); background:rgba(97,173,255,.06); font-size:12px; }
+    .optimization-note strong { color:var(--text); }
+    .calculation-state { display:grid; grid-template-columns:auto minmax(0,1fr) auto; align-items:center; gap:12px; margin:13px 0 0; padding:13px 15px; border:1px solid rgba(97,173,255,.38); border-radius:10px; color:var(--text); background:rgba(10,31,52,.94); box-shadow:0 12px 34px rgba(0,0,0,.18); }
+    .calculation-state strong,.calculation-state span { display:block; }
+    .calculation-state small { display:block; margin-top:2px; color:var(--muted); }
+    .calculation-spinner { width:18px; height:18px; border:2px solid rgba(97,173,255,.22); border-top-color:var(--blue); border-radius:50%; animation:spin .8s linear infinite; }
+    .calculation-state.ok { border-color:rgba(63,224,157,.34); }
+    .calculation-state.ok .calculation-spinner { border-color:var(--green); animation:none; }
+    .calculation-state.bad { border-color:rgba(255,107,122,.42); }
+    .calculation-state.bad .calculation-spinner { border-color:var(--red); animation:none; }
+    .calculation-elapsed { color:var(--muted); font-size:12px; font-variant-numeric:tabular-nums; }
+    body.is-calculating .metrics,body.is-calculating .grid { opacity:.58; filter:saturate(.72); pointer-events:none; transition:opacity .18s ease; }
+    @keyframes spin { to { transform:rotate(360deg); } }
+    .metrics { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin:22px 0 14px; }
+    .metric,.card { border:1px solid var(--line); border-radius:15px; background:linear-gradient(145deg,rgba(16,34,56,.94),rgba(8,22,38,.94)); box-shadow:var(--shadow); }
+    .metric { display:flex; flex-direction:column; padding:18px; min-height:110px; }
+    .metric span { color:var(--muted); font-size:12px; }
+    .metric strong { display:block; margin:7px 0 2px; font-size:clamp(21px,2.5vw,31px); letter-spacing:-.035em; color:var(--green); }
+    .metric small { display:block; overflow:hidden; margin-top:auto; color:var(--muted); text-overflow:ellipsis; white-space:nowrap; }
+    .grid { display:grid; grid-template-columns:1.45fr .75fr; gap:14px; margin-top:14px; }
+    .card { padding:20px; min-width:0; }
+    .card-head { display:flex; align-items:flex-start; justify-content:space-between; gap:18px; margin-bottom:14px; }
+    h2 { margin:0; font-size:17px; }
+    .card p { margin:4px 0 0; color:var(--muted); font-size:12px; }
+    canvas { display:block; width:100%; height:300px; border-radius:10px; background:rgba(3,12,22,.45); }
+    #cashflowChart { height:260px; }
+    .cashflow-card { grid-column:2; grid-row:2; align-self:start; }
+    .strategy-details-card { grid-column:1; grid-row:2; }
+    .detail-metrics { grid-template-columns:repeat(4,minmax(0,1fr)); margin:10px 0 0; }
+    .legend { display:flex; flex-wrap:wrap; gap:8px 14px; color:var(--muted); font-size:12px; }
+    .legend span::before { content:""; display:inline-block; width:16px; height:2px; margin:0 6px 3px 0; background:var(--blue); }
+    .legend .forecast::before { background:var(--green); }
+    .legend .charge::before,.legend .discharge::before { width:8px; height:8px; margin-bottom:0; border-radius:50%; background:var(--orange); }
+    .legend .discharge::before { background:#e879f9; }
+    .ranking { display:grid; gap:10px; margin-top:15px; }
+    .rank-row { display:grid; grid-template-columns:24px minmax(110px,1fr) 1.3fr auto; align-items:center; gap:9px; }
+    .rank { color:var(--muted); font-variant-numeric:tabular-nums; }
+    .rank-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .bar-track { height:8px; overflow:hidden; border-radius:20px; background:#071321; }
+    .bar { display:block; height:100%; border-radius:inherit; background:var(--green); }
+    .bar.negative { background:var(--red); }
+    .rank-value { min-width:82px; text-align:right; font-variant-numeric:tabular-nums; }
+    .wide { grid-column:1/-1; }
+    .table-wrap { overflow:auto; border:1px solid var(--line); border-radius:11px; }
+    table { width:100%; border-collapse:collapse; min-width:880px; }
+    th,td { padding:11px 12px; border-bottom:1px solid rgba(33,57,85,.74); text-align:left; white-space:nowrap; }
+    th { position:sticky; top:0; z-index:1; color:var(--muted); background:#0a1828; font-size:10px; letter-spacing:.07em; text-transform:uppercase; }
+    td.num,th.num { text-align:right; font-variant-numeric:tabular-nums; }
+    tbody tr:first-child { background:rgba(63,224,157,.06); }
+    tbody tr:last-child td { border-bottom:0; }
+    .positive { color:var(--green); } .negative-text { color:var(--red); }
+    tr.selected-row { background:rgba(97,173,255,.12); }
+    tr.strategy-row { cursor:pointer; }
+    .model-table { min-width:780px; }
+    .log-wrap { max-height:520px; }
+    .log-actions { display:flex; align-items:center; gap:12px; }
+    .log-actions span { color:var(--muted); font-size:12px; }
+    .secondary-button { min-height:34px; padding:0 12px; color:var(--text); border:1px solid var(--line); background:#0a1b2d; font-size:12px; }
+    .action-badge { display:inline-flex; min-width:76px; justify-content:center; padding:3px 8px; border-radius:20px; font-size:11px; font-weight:800; text-transform:uppercase; }
+    .action-badge.charge { color:var(--blue); background:rgba(97,173,255,.12); }
+    .action-badge.discharge { color:var(--green); background:rgba(63,224,157,.12); }
+    .strategy-guide { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); align-items:stretch; gap:12px; }
+    .guide-item { display:grid; grid-template-rows:auto minmax(64px,1fr) auto auto; min-height:218px; padding:16px; border:1px solid var(--line); border-radius:12px; background:rgba(5,17,30,.48); }
+    .guide-heading { display:flex; align-items:center; gap:10px; margin-bottom:7px; }
+    .guide-rank { display:grid; flex:0 0 28px; width:28px; height:28px; place-items:center; border-radius:8px; color:#06101d; background:var(--green); font-size:12px; font-weight:850; }
+    .guide-item h3 { margin:0; font-size:15px; }
+    .guide-item p { margin:0; font-size:13px; line-height:1.55; }
+    .guide-result { display:flex; flex-wrap:wrap; align-items:flex-end; gap:7px 14px; margin-top:11px; padding-top:11px; border-top:1px solid rgba(33,57,85,.55); color:var(--muted); font-size:11px; }
+    .guide-result strong { color:var(--text); font-weight:750; }
+    .guide-settings { min-height:40px; margin-top:8px; color:var(--muted); font:11px/1.45 ui-monospace,SFMono-Regular,Consolas,monospace; }
+    .settings-box { margin-top:12px; padding:12px 14px; border:1px solid var(--line); border-radius:10px; background:rgba(4,15,27,.46); }
+    .settings-box span { display:block; margin-bottom:5px; color:var(--muted); font-size:11px; text-transform:uppercase; }
+    .settings-box code { color:var(--text); white-space:normal; word-break:break-word; }
+    footer { margin-top:20px; color:var(--muted); font-size:12px; }
+    @media (max-width:980px) { .controls{grid-template-columns:repeat(3,1fr)} .fee-control,.controls button{grid-column:span 1}.grid{grid-template-columns:1fr}.metrics{grid-template-columns:repeat(2,1fr)}.cashflow-card,.strategy-details-card{grid-column:1;grid-row:auto;align-self:stretch}.detail-metrics{grid-template-columns:repeat(2,minmax(0,1fr))} }
+    @media (max-width:700px) { .strategy-guide{grid-template-columns:1fr} }
+    @media (max-width:620px) { main{padding:34px 0}header{align-items:flex-start;flex-direction:column}.controls{grid-template-columns:1fr 1fr}.controls>div:first-child,.controls button{grid-column:1/-1}.calculation-state{grid-template-columns:auto 1fr}.calculation-elapsed{grid-column:2}.metrics{grid-template-columns:1fr 1fr}.metric{min-height:95px;padding:14px}.card{padding:15px}.rank-row{grid-template-columns:20px 1fr auto}.bar-track{display:none} }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <div>
+      <div class="eyebrow">Real thesis predictions · strategy research</div>
+      <h1>Day-Ahead Power Trader</h1>
+      <p class="lede">Compare forecast-driven battery strategies across the saved 15-minute test predictions. Training stays offline; results include battery losses and editable DK1 market and grid fees.</p>
+    </div>
+    <a class="api-link" href="/api/docs">API docs</a>
+  </header>
+
+  <section class="controls" aria-label="Analysis controls">
+    <div><label for="forecast">Prediction series</label><select id="forecast"><option value="Prediction">Transfer residual ensemble</option><option value="Hourly_Baseline">Hourly baseline</option><option value="Direct_15min_Prediction">Direct 15-minute ensemble</option></select></div>
+    <div><label for="strategy">Strategy to inspect</label><select id="strategy" disabled><option value="">Loading strategies…</option></select></div>
+    <div><label for="mode">Evaluation mode</label><select id="mode"><option value="optimized">Tune earlier → test 6 full days</option><option value="fixed">Fixed defaults</option></select></div>
+    <div><label for="window">History used</label><select id="window"><option value="">Full saved period</option><option value="14">Last 14 days</option><option value="7">Last 7 days</option></select></div>
+    <div><label for="capacity">Capacity MWh</label><input id="capacity" type="number" min="1" step="10" value="100"></div>
+    <div><label for="power">Power MW</label><input id="power" type="number" min="1" step="5" value="25"></div>
+    <div><label for="roundTrip">Round-trip efficiency %</label><input id="roundTrip" type="number" min="1" max="100" step="1" value="90"></div>
+    <div class="fee-control"><label for="chargeFee">Charge fees DKK/MWh</label><input id="chargeFee" type="number" min="0" step="0.01" value="115.41"></div>
+    <div class="fee-control"><label for="dischargeFee">Discharge fees DKK/MWh</label><input id="dischargeFee" type="number" min="0" step="0.01" value="10.71"></div>
+    <button id="run">Compare strategies</button>
+  </section>
+  <div class="cost-note"><strong>DK1 2026 distribution-connected assumption:</strong> charge fee = Energinet system 72 + network 43 + Nord Pool 0.41; discharge fee = Energinet feed-in 5 + production balance 5.30 + Nord Pool 0.41 DKK/MWh. Excludes local DSO tariffs, electricity tax, VAT, fixed/capacity charges, imbalance costs, and Nord Pool currency service. The no-fee potential reruns each strategy with all three modeled trading fees set to zero; efficiency and degradation still apply. Sources: <a href="https://energinet.dk/media/ikylsqle/energinets_tarifkatalog_2026.pdf" target="_blank" rel="noreferrer">Energinet</a> and <a href="https://www.nordpoolgroup.com/4a7ad8/globalassets/trading-and-services/nord-pool-fee-schedule-2026-nordic-and-baltic-market.pdf" target="_blank" rel="noreferrer">Nord Pool</a>.</div>
+  <div class="calculation-state" id="calculationState" role="status" aria-live="polite">
+    <span class="calculation-spinner" aria-hidden="true"></span>
+    <div><strong id="statusText">Loading saved predictions…</strong><small id="statusDetail">Preparing strategy calculations.</small></div>
+    <span class="calculation-elapsed" id="calculationElapsed">0s</span>
+  </div>
+  <div class="optimization-note" id="optimizationNote">Preparing chronological train/test evaluation…</div>
+
+  <section class="metrics">
+    <article class="metric"><span>Selected strategy</span><strong id="bestStrategy">—</strong><small id="bestStrategyNote">Default strategy settings</small></article>
+    <article class="metric"><span>Out-of-sample PnL</span><strong id="bestCashflow">—</strong><small>Training-selected settings on test</small></article>
+    <article class="metric"><span>Maximum drawdown</span><strong id="bestDrawdown">—</strong><small>Selected strategy</small></article>
+    <article class="metric"><span>Selected-model MAE</span><strong id="modelMae">—</strong><small id="datasetNote">Loading model metrics</small></article>
+  </section>
+
+  <section class="grid">
+    <article class="card">
+      <div class="card-head"><div><h2>DK1 actual price vs prediction</h2><p id="priceSubtitle">Saved 15-minute test forecast</p></div><div class="legend"><span class="actual">Actual</span><span class="forecast">Prediction</span><span class="charge">Charge</span><span class="discharge">Discharge</span></div></div>
+      <canvas id="priceChart"></canvas>
+    </article>
+    <article class="card">
+      <div class="card-head"><div><h2>Strategy cashflow ranking</h2><p>Same forecast, battery, and realized prices</p></div></div>
+      <div class="ranking" id="ranking"></div>
+    </article>
+    <article class="card cashflow-card">
+      <div class="card-head"><div><h2>Selected strategy cumulative cashflow</h2><p id="cashSubtitle">Calculated from realized interval cashflows</p></div></div>
+      <canvas id="cashflowChart"></canvas>
+    </article>
+    <article class="card strategy-details-card">
+      <div class="card-head"><div><h2>Selected strategy details</h2><p id="strategyDescription">Run the comparison to see the leader.</p></div></div>
+      <div class="metrics detail-metrics">
+        <div class="metric"><span>Optimized training PnL</span><strong id="trainCashflow">—</strong><small>Best setting on earlier data</small></div>
+        <div class="metric"><span>Potential test PnL</span><strong id="testPotentialCashflow">—</strong><small>Hindsight upper bound on test</small></div>
+        <div class="metric"><span>Potential without fees</span><strong id="noFeePotentialCashflow">—</strong><small>Hindsight; modeled fees set to 0</small></div>
+        <div class="metric"><span>Potential fee impact</span><strong id="potentialFeeImpact">—</strong><small>No-fee minus fee-adjusted potential</small></div>
+        <div class="metric"><span>Perfect-foresight ceiling</span><strong id="oracleCashflow">—</strong><small>Actual-price DP benchmark</small></div>
+        <div class="metric"><span>Active intervals</span><strong id="activeIntervals">—</strong><small>Charge + discharge</small></div>
+        <div class="metric"><span>Risk-adjusted score</span><strong id="riskScore">—</strong><small>Cashflow − drawdown</small></div>
+        <div class="metric"><span>6-day daily Sharpe</span><strong id="dailySharpe">—</strong><small id="sharpeNote">Annualized cashflow stability proxy</small></div>
+        <div class="metric"><span>Final state of charge</span><strong id="finalSoc">—</strong><small>MWh</small></div>
+        <div class="metric"><span>Round-trip efficiency</span><strong id="efficiencyUsed">—</strong><small>Charge × discharge efficiency</small></div>
+        <div class="metric"><span>Modeled fees</span><strong id="modeledFees">—</strong><small>Included in net cashflow</small></div>
+      </div>
+      <div class="settings-box"><span>Training-optimized parameters used for the out-of-sample test</span><code id="strategySettings">Loading…</code></div>
+      <div class="settings-box"><span>Test-period potential parameters (hindsight only)</span><code id="testPotentialSettings">Loading…</code></div>
+      <div class="settings-box"><span>No-fee potential parameters (hindsight only)</span><code id="noFeePotentialSettings">Loading…</code></div>
+    </article>
+
+    <article class="card wide">
+      <div class="card-head"><div><h2>Strategy comparison</h2><p>OOS test uses training-selected parameters. Test and no-fee potential re-optimize on the test itself and are hindsight upper bounds, not investable results.</p></div></div>
+      <div class="table-wrap"><table><thead><tr><th>#</th><th>Strategy</th><th class="num">OOS test PnL</th><th class="num">Optimized train PnL</th><th class="num">Test potential</th><th class="num">Potential uplift</th><th class="num">No-fee potential</th><th class="num">Potential fee impact</th><th class="num">Fees</th><th class="num">Degradation</th><th class="num">Max drawdown</th><th class="num">Risk score</th><th class="num">6-day Sharpe</th><th class="num">Trades</th><th class="num">Charge</th><th class="num">Discharge</th></tr></thead><tbody id="strategyRows"></tbody></table></div>
+    </article>
+
+    <article class="card wide">
+      <div class="card-head"><div><h2>Charge and discharge log</h2><p id="tradeSubtitle">Select a strategy to inspect every executed battery action.</p></div><div class="log-actions"><span id="tradeCount">0 actions</span><button type="button" class="secondary-button" id="downloadLog">Download CSV</button></div></div>
+      <div class="table-wrap log-wrap"><table><thead><tr><th>Time</th><th>Action</th><th class="num">Actual price</th><th class="num">Forecast</th><th class="num">Dispatch MW</th><th class="num">State of charge</th><th class="num">Interval cashflow</th><th class="num">Cumulative cashflow</th></tr></thead><tbody id="tradeRows"></tbody></table></div>
+    </article>
+
+    <article class="card wide">
+      <div class="card-head"><div><h2>How each strategy works</h2><p>Charging means buying and storing electricity; discharging means selling it. Predictions choose the action, while realized prices determine the displayed cashflow.</p></div></div>
+      <div class="strategy-guide" id="strategyGuide"></div>
+    </article>
+
+    <article class="card wide">
+      <div class="card-head"><div><h2>Forecast model metrics</h2><p>Original holdout metrics exported from the thesis result workbook.</p></div></div>
+      <div class="table-wrap"><table class="model-table"><thead><tr><th>Model</th><th>Type</th><th class="num">Features</th><th class="num">MAE</th><th class="num">RMSE</th><th class="num">sMAPE</th><th class="num">R²</th><th class="num">Coverage</th></tr></thead><tbody id="modelRows"></tbody></table></div>
+    </article>
+  </section>
+  <footer id="sourceNote">Research tooling only — not financial advice or a production trading system.</footer>
+</main>
+
+<script>
+const $ = selector => document.querySelector(selector);
+const state = { results:null, comparison:null };
+const dkk = new Intl.NumberFormat('en-DK',{maximumFractionDigits:0});
+const colors = { actual:'#61adff', forecast:'#3fe09d', charge:'#ffb55f', discharge:'#e879f9', grid:'#213955', muted:'#8ea5bf', green:'#3fe09d', red:'#ff6b7a' };
+const modelNames = { Prediction:'Transfer residual ensemble', Hourly_Baseline:'Hourly baseline only', Direct_15min_Prediction:'Direct 15-min ensemble' };
+let calculationTimer=null;
+
+function fmt(value,digits=2){ return value==null || !Number.isFinite(Number(value)) ? '—' : Number(value).toLocaleString('en-DK',{maximumFractionDigits:digits}); }
+function cash(value){ return value==null ? '—' : `${dkk.format(value)} DKK`; }
+function selectedDays(){ const value=$('#window').value; return value ? Number(value) : null; }
+function setStatus(text,kind='loading',detail=''){
+  $('#statusText').textContent=text; $('#statusDetail').textContent=detail;
+  $('#calculationState').className=`calculation-state ${kind==='ok'?'ok':kind==='bad'?'bad':''}`;
+}
+function setCalculating(active,optimize=false){
+  const controls=document.querySelectorAll('.controls select,.controls input,.controls button');
+  controls.forEach(control=>{control.disabled=active});
+  document.body.classList.toggle('is-calculating',active);
+  document.querySelector('main').setAttribute('aria-busy',String(active));
+  clearInterval(calculationTimer); calculationTimer=null;
+  if(active){
+    const started=Date.now(); const elapsed=$('#calculationElapsed');
+    const updateElapsed=()=>{elapsed.textContent=`${Math.floor((Date.now()-started)/1000)}s elapsed`};
+    updateElapsed(); calculationTimer=setInterval(updateElapsed,1000);
+    $('#run').textContent='Calculating…';
+    setStatus('Calculating strategy results…','loading',optimize?'Searching training grids, testing unseen days, and calculating fee-adjusted and zero-fee potential across 16 strategies.':'Running 16 fixed strategies with fee-adjusted and zero-fee counterfactuals.');
+  }else{
+    $('#run').textContent='Compare strategies';
+    $('#calculationElapsed').textContent='Complete';
+    $('#strategy').disabled=!state.comparison;
+  }
+}
+function metricForForecast(metrics,forecast){ return metrics.find(row=>row.Model===modelNames[forecast]); }
+
+function drawLineChart(canvas,rows,series){
+  const ctx=canvas.getContext('2d'); const rect=canvas.getBoundingClientRect(); const scale=devicePixelRatio||1;
+  canvas.width=Math.round(rect.width*scale); canvas.height=Math.round(rect.height*scale); ctx.scale(scale,scale);
+  const width=rect.width,height=rect.height,margin={l:58,r:16,t:18,b:38};
+  const innerW=width-margin.l-margin.r,innerH=height-margin.t-margin.b;
+  const values=[]; rows.forEach(row=>series.forEach(s=>{const v=Number(row[s.key]);if(Number.isFinite(v))values.push(v)}));
+  ctx.clearRect(0,0,width,height); if(!rows.length||!values.length)return;
+  let min=Math.min(...values),max=Math.max(...values); const pad=Math.max((max-min)*.08,1); min-=pad;max+=pad;
+  const x=i=>margin.l+(rows.length===1?0:i/(rows.length-1))*innerW; const y=v=>margin.t+(1-(v-min)/(max-min))*innerH;
+  ctx.font='11px system-ui'; ctx.fillStyle=colors.muted; ctx.textAlign='right'; ctx.textBaseline='middle';
+  for(let i=0;i<=4;i++){const value=min+i*(max-min)/4,yy=y(value);ctx.strokeStyle=colors.grid;ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(margin.l,yy);ctx.lineTo(width-margin.r,yy);ctx.stroke();ctx.fillText(value.toFixed(0),margin.l-8,yy)}
+  ctx.textAlign='center';ctx.textBaseline='top'; const ticks=5;
+  for(let i=0;i<ticks;i++){const idx=Math.round(i*(rows.length-1)/(ticks-1));const label=new Date(rows[idx].HourUTC).toLocaleDateString('en-DK',{month:'short',day:'numeric'});ctx.fillText(label,x(idx),height-margin.b+12)}
+  series.forEach(s=>{
+    if(s.type==='markers'){
+      rows.forEach((row,i)=>{
+        if(row.Action!==s.action)return; const v=Number(row[s.key]); if(!Number.isFinite(v))return;
+        const xx=x(i),yy=y(v),size=s.size||5.5; ctx.save();ctx.fillStyle=s.color;ctx.strokeStyle='#06101d';ctx.lineWidth=1.5;ctx.beginPath();
+        if(s.shape==='down'){ctx.moveTo(xx-size,yy-size);ctx.lineTo(xx+size,yy-size);ctx.lineTo(xx,yy+size)}else{ctx.moveTo(xx-size,yy+size);ctx.lineTo(xx+size,yy+size);ctx.lineTo(xx,yy-size)}
+        ctx.closePath();ctx.fill();ctx.stroke();ctx.restore();
+      });
+      return;
+    }
+    ctx.strokeStyle=s.color;ctx.lineWidth=s.width||1.8;ctx.setLineDash(s.dash||[]);ctx.beginPath();let started=false;rows.forEach((row,i)=>{const v=Number(row[s.key]);if(!Number.isFinite(v))return;if(!started){ctx.moveTo(x(i),y(v));started=true}else ctx.lineTo(x(i),y(v))});ctx.stroke();ctx.setLineDash([]);
+  });
+}
+
+function renderPrice(){
+  const rows=state.comparison?.selected_strategy_series||[];
+  drawLineChart($('#priceChart'),rows,[{key:'Actual_Price',color:colors.actual,width:1.6},{key:'Forecast_Price',color:colors.forecast,width:1.8},{type:'markers',key:'Actual_Price',action:'charge',shape:'down',color:colors.charge},{type:'markers',key:'Actual_Price',action:'discharge',shape:'up',color:colors.discharge}]);
+  if(rows.length){const start=new Date(rows[0].HourUTC).toLocaleDateString('en-DK');const end=new Date(rows.at(-1).HourUTC).toLocaleDateString('en-DK');const charges=rows.filter(row=>row.Action==='charge').length,discharges=rows.filter(row=>row.Action==='discharge').length;$('#priceSubtitle').textContent=`${rows.length.toLocaleString()} intervals · ${charges} charges · ${discharges} discharges · ${start} to ${end}`}
+}
+
+function renderCashflow(){
+  const rows=state.comparison?.selected_strategy_series||[];
+  drawLineChart($('#cashflowChart'),rows,[{key:'Cumulative_Cashflow',color:colors.green,width:2.2}]);
+}
+
+function syncStrategySelector(data){
+  const select=$('#strategy');
+  select.innerHTML=data.strategies.map((row,index)=>`<option value="${row.Strategy}">#${index+1} · ${row.Strategy}</option>`).join('');
+  select.value=data.selected_strategy;
+  select.disabled=false;
+}
+
+function selectedTrades(){
+  return (state.comparison?.selected_strategy_series||[]).filter(row=>row.Action==='charge'||row.Action==='discharge');
+}
+
+function renderTradeLog(){
+  const data=state.comparison,trades=selectedTrades();
+  $('#tradeCount').textContent=`${trades.length.toLocaleString()} actions`;
+  $('#tradeSubtitle').textContent=`${data.selected_strategy} · ${data.evaluation.mode==='out_of_sample_optimization'?'unseen test period':'selected period'} · prices and cashflow in DKK/MWh and DKK`;
+  $('#downloadLog').disabled=!trades.length;
+  $('#tradeRows').innerHTML=trades.length?trades.map(row=>{
+    const time=new Date(row.HourUTC).toLocaleString('en-DK',{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});
+    return `<tr><td>${time}</td><td><span class="action-badge ${row.Action}">${row.Action}</span></td><td class="num">${fmt(row.Actual_Price,2)}</td><td class="num">${fmt(row.Forecast_Price,2)}</td><td class="num">${fmt(Math.abs(row.Dispatch_MW),2)}</td><td class="num">${fmt(row.State_Of_Charge_MWh,2)} MWh</td><td class="num ${row.Cashflow>=0?'positive':'negative-text'}">${cash(row.Cashflow)}</td><td class="num ${row.Cumulative_Cashflow>=0?'positive':'negative-text'}">${cash(row.Cumulative_Cashflow)}</td></tr>`;
+  }).join(''):'<tr><td colspan="8">No charge or discharge actions occurred for this strategy and window.</td></tr>';
+}
+
+function downloadTradeLog(){
+  const trades=selectedTrades(); if(!trades.length)return;
+  const columns=['HourUTC','Action','Actual_Price','Forecast_Price','Dispatch_MW','State_Of_Charge_MWh','Cashflow','Cumulative_Cashflow'];
+  const csv=[columns.join(','),...trades.map(row=>columns.map(column=>`"${String(row[column]??'').replaceAll('"','""')}"`).join(','))].join('\n');
+  const url=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'})); const link=document.createElement('a');
+  link.href=url; link.download=`${state.comparison.selected_strategy.toLowerCase().replaceAll(' ','-')}-trade-log.csv`; link.click(); URL.revokeObjectURL(url);
+}
+
+function renderModelMetrics(){
+  const metrics=state.results.model_metrics; const selected=metricForForecast(metrics,$('#forecast').value);
+  $('#modelMae').textContent=selected?fmt(selected.MAE,2):'—'; $('#datasetNote').textContent=selected?selected.Model:'Model metric unavailable';
+  $('#modelRows').innerHTML=metrics.map(row=>`<tr><td>${row.Model}</td><td>${row.Model_Type}</td><td class="num">${fmt(row.Number_Features,0)}</td><td class="num">${fmt(row.MAE,2)}</td><td class="num">${fmt(row.RMSE,2)}</td><td class="num">${fmt(row.sMAPE,2)}%</td><td class="num">${fmt(row.R2,3)}</td><td class="num">${fmt(row.Test_Coverage_Pct,0)}%</td></tr>`).join('');
+}
+
+function renderComparison(){
+  const data=state.comparison,rows=data.strategies; syncStrategySelector(data);
+  const selectedIndex=rows.findIndex(row=>row.Strategy===data.selected_strategy),selected=rows[selectedIndex];
+  const feeAdjustedPotential=selected.Test_Potential_Cashflow??selected.Cashflow;
+  const potentialFeeImpact=selected.No_Fee_Potential_Cashflow==null?null:selected.No_Fee_Potential_Cashflow-feeAdjustedPotential;
+  $('#bestStrategy').textContent=selected.Strategy; $('#bestCashflow').textContent=cash(selected.Cashflow); $('#bestDrawdown').textContent=cash(selected.Max_Drawdown);
+  $('#bestStrategyNote').textContent=`Rank #${selectedIndex+1} · ${data.forecast_model}`; $('#trainCashflow').textContent=cash(selected.Train_Cashflow); $('#testPotentialCashflow').textContent=cash(selected.Test_Potential_Cashflow); $('#noFeePotentialCashflow').textContent=cash(selected.No_Fee_Potential_Cashflow); $('#potentialFeeImpact').textContent=cash(potentialFeeImpact); $('#oracleCashflow').textContent=cash(data.perfect_foresight_benchmark?.Cashflow); $('#activeIntervals').textContent=fmt(selected.Active_Intervals,0); $('#riskScore').textContent=cash(selected.Risk_Adjusted_Score);
+  $('#dailySharpe').textContent=fmt(selected.Daily_Sharpe,2); $('#sharpeNote').textContent=`${data.evaluation.daily_observations} complete daily observations · annualized`; $('#finalSoc').textContent=fmt(selected.Final_SOC_MWh,1); $('#efficiencyUsed').textContent=`${fmt(selected.Round_Trip_Efficiency_Pct,1)}%`; $('#modeledFees').textContent=cash(selected.Fee_Cost); $('#strategyDescription').textContent=selected.Description; $('#strategySettings').textContent=selected.Settings; $('#testPotentialSettings').textContent=selected.Test_Potential_Settings||'Available only in optimized mode'; $('#noFeePotentialSettings').textContent=selected.No_Fee_Potential_Settings||'Unavailable'; $('#cashSubtitle').textContent=`${selected.Strategy} · ${data.dataset.selected_rows.toLocaleString()} ${data.evaluation.mode==='out_of_sample_optimization'?'unseen test':'evaluation'} intervals`;
+  const evaluation=data.evaluation;
+  if(evaluation.mode==='out_of_sample_optimization'){
+    const trainStart=new Date(evaluation.train_start).toLocaleDateString('en-DK'),trainEnd=new Date(evaluation.train_end).toLocaleDateString('en-DK'),testStart=new Date(evaluation.test_start).toLocaleDateString('en-DK'),testEnd=new Date(evaluation.test_end).toLocaleDateString('en-DK');
+    $('#optimizationNote').innerHTML=`<strong>Six-full-day holdout:</strong> each strategy searched its parameter grid on ${evaluation.train_rows.toLocaleString()} earlier intervals (${trainStart}–${trainEnd}), then applied that setting unchanged to ${evaluation.daily_observations} unseen DK1 days (${testStart}–${testEnd}). Test potential separately searches those test days with the selected fees; no-fee potential repeats the search with modeled fees at zero. Both are hindsight ceilings, not results that could have been known beforehand.`;
+  }else{$('#optimizationNote').innerHTML='<strong>Fixed defaults:</strong> no parameter tuning. Rankings use the complete selected history, and the no-fee result reruns the same defaults with modeled fees at zero.'}
+  const maxAbs=Math.max(...rows.map(row=>Math.abs(row.Cashflow)),1);
+  $('#ranking').innerHTML=rows.slice(0,8).map((row,index)=>`<div class="rank-row"><span class="rank">${index+1}</span><span class="rank-name" title="${row.Strategy}">${row.Strategy}</span><span class="bar-track"><span class="bar ${row.Cashflow<0?'negative':''}" style="width:${Math.max(3,Math.abs(row.Cashflow)/maxAbs*100)}%"></span></span><span class="rank-value ${row.Cashflow>=0?'positive':'negative-text'}">${dkk.format(row.Cashflow)}</span></div>`).join('');
+  $('#strategyRows').innerHTML=rows.map((row,index)=>{const uplift=row.Test_Potential_Cashflow==null?null:row.Test_Potential_Cashflow-row.Cashflow;const potentialBaseline=row.Test_Potential_Cashflow??row.Cashflow;const feeImpact=row.No_Fee_Potential_Cashflow==null?null:row.No_Fee_Potential_Cashflow-potentialBaseline;return `<tr class="strategy-row ${row.Strategy===selected.Strategy?'selected-row':''}" data-strategy="${row.Strategy}" title="Click to inspect this strategy"><td>${index+1}</td><td>${row.Strategy}</td><td class="num ${row.Cashflow>=0?'positive':'negative-text'}">${cash(row.Cashflow)}</td><td class="num">${cash(row.Train_Cashflow)}</td><td class="num ${row.Test_Potential_Cashflow>=0?'positive':'negative-text'}">${cash(row.Test_Potential_Cashflow)}</td><td class="num">${cash(uplift)}</td><td class="num ${row.No_Fee_Potential_Cashflow>=0?'positive':'negative-text'}">${cash(row.No_Fee_Potential_Cashflow)}</td><td class="num">${cash(feeImpact)}</td><td class="num">${cash(row.Fee_Cost)}</td><td class="num">${cash(row.Degradation_Cost)}</td><td class="num">${cash(row.Max_Drawdown)}</td><td class="num">${cash(row.Risk_Adjusted_Score)}</td><td class="num">${fmt(row.Daily_Sharpe,2)}</td><td class="num">${fmt(row.Active_Intervals,0)}</td><td class="num">${fmt(row.Charge_Intervals,0)}</td><td class="num">${fmt(row.Discharge_Intervals,0)}</td></tr>`}).join('');
+  $('#strategyGuide').innerHTML=rows.map((row,index)=>`<section class="guide-item"><div class="guide-heading"><span class="guide-rank">${index+1}</span><h3>${row.Strategy}</h3></div><p>${row.Description}</p><div class="guide-result"><span>${evaluation.mode==='out_of_sample_optimization'?'OOS test':'This run'}: <strong class="${row.Cashflow>=0?'positive':'negative-text'}">${cash(row.Cashflow)}</strong></span><span>Test potential: <strong>${cash(row.Test_Potential_Cashflow)}</strong></span><span>No-fee potential: <strong>${cash(row.No_Fee_Potential_Cashflow)}</strong></span><span><strong>${fmt(row.Active_Intervals,0)}</strong> charge/discharge actions</span></div><div class="guide-settings">${row.Settings}</div></section>`).join('');
+  renderCashflow(); renderTradeLog();
+}
+
+async function loadDashboard(){
+  const days=selectedDays(); const query=days?`?days=${days}`:'';
+  const roundTrip=Number($('#roundTrip').value)/100; const oneWayEfficiency=Math.sqrt(roundTrip);
+  const strategy=$('#strategy').disabled||!$('#strategy').value?null:$('#strategy').value;
+  const optimize=$('#mode').value==='optimized';
+  const request={forecast_col:$('#forecast').value,strategy,days,optimize,test_days:6,battery:{capacity_mwh:Number($('#capacity').value),power_mw:Number($('#power').value),initial_soc_mwh:0,charge_efficiency:oneWayEfficiency,discharge_efficiency:oneWayEfficiency,charge_fee_per_mwh:Number($('#chargeFee').value),discharge_fee_per_mwh:Number($('#dischargeFee').value)}};
+  setCalculating(true,optimize);
+  try{
+    const [resultsResponse,comparisonResponse]=await Promise.all([fetch(`/api/results${query}`),fetch('/api/compare',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(request)})]);
+    const results=await resultsResponse.json(),comparison=await comparisonResponse.json();
+    if(!resultsResponse.ok)throw new Error(results.detail||`Results HTTP ${resultsResponse.status}`); if(!comparisonResponse.ok)throw new Error(comparison.detail||`Comparison HTTP ${comparisonResponse.status}`);
+    state.results=results;state.comparison=comparison;renderModelMetrics();renderComparison();renderPrice();
+    $('#sourceNote').textContent=`Source: ${results.dataset.source_forecast_file} · ${results.dataset.rows.toLocaleString()} saved prediction intervals · Wind features: ${results.dataset.feature_source||'not available'} · Strategy calculations use realized prices. Research tooling only.`;
+    setStatus('Results ready','ok',`${comparison.selected_strategy} selected · ${optimize?'out-of-sample optimized':'fixed defaults'} · ${fmt(roundTrip*100,1)}% round trip · fee-adjusted and zero-fee potential calculated.`);
+  }catch(error){setStatus('Calculation failed','bad',error.message)}
+  finally{setCalculating(false)}
+}
+
+$('#run').addEventListener('click',loadDashboard); $('#forecast').addEventListener('change',loadDashboard); $('#strategy').addEventListener('change',loadDashboard); $('#mode').addEventListener('change',loadDashboard); $('#window').addEventListener('change',loadDashboard); $('#downloadLog').addEventListener('click',downloadTradeLog);
+$('#strategyRows').addEventListener('click',event=>{const row=event.target.closest('tr[data-strategy]');if(!row)return;$('#strategy').value=row.dataset.strategy;loadDashboard()});
+window.addEventListener('resize',()=>{renderPrice();renderCashflow()}); loadDashboard();
+</script>
+</body>
+</html>

@@ -24,9 +24,9 @@
   "battery": {
     "capacity_mwh": 100.0,
     "power_mw": 25.0,
-    "initial_soc_mwh": 50.0,
-    "charge_efficiency": 0.95,
-    "discharge_efficiency": 0.95,
+    "initial_soc_mwh": 0.0,
+    "charge_efficiency": 0.9486832980505138,
+    "discharge_efficiency": 0.9486832980505138,
     "low_quantile": 0.25,
     "high_quantile": 0.75,
     "fee_per_mwh": 0.0,
@@ -82,10 +82,47 @@
     "discharge_rank": 73,
     "min_daily_spread": 0.0
   },
+  "best_hours": {
+    "hours_per_day": 2,
+    "min_profit_dkk_per_mwh": 0.0,
+    "market_timezone": "Europe/Copenhagen"
+  },
   "ensemble_agreement": {
     "low_quantile": 0.25,
     "high_quantile": 0.75,
     "min_agreement": 0.6,
     "max_model_spread": null
+  },
+  "rolling_optimizer": {
+    "soc_steps": 40,
+    "terminal_soc_mwh": 0.0,
+    "market_timezone": "Europe/Copenhagen"
+  },
+  "uncertainty_optimizer": {
+    "uncertainty_penalty": 1.0,
+    "max_model_spread": 80.0,
+    "soc_steps": 40,
+    "terminal_soc_mwh": 0.0,
+    "market_timezone": "Europe/Copenhagen"
+  },
+  "degradation_optimizer": {
+    "degradation_cost_per_mwh": 40.0,
+    "soc_steps": 40,
+    "terminal_soc_mwh": 0.0,
+    "market_timezone": "Europe/Copenhagen"
+  },
+  "wind_signal": {
+    "low_wind_quantile": 0.25,
+    "high_wind_quantile": 0.75,
+    "ramp_threshold_mw": 100.0,
+    "market_timezone": "Europe/Copenhagen"
+  },
+  "wind_confirmed_optimizer": {
+    "low_wind_quantile": 0.25,
+    "high_wind_quantile": 0.75,
+    "ramp_threshold_mw": 100.0,
+    "soc_steps": 40,
+    "terminal_soc_mwh": 0.0,
+    "market_timezone": "Europe/Copenhagen"
   }
 }

@@ -10,6 +10,11 @@ requires-python = ">=3.10"
 dependencies = [
   "pandas>=2.2",
   "numpy>=1.26",
+  "fastapi>=0.117",
+]
+
+[project.optional-dependencies]
+training = [
   "openpyxl>=3.1",
   "scikit-learn>=1.5",
   "xgboost>=2.1",
@@ -17,8 +22,6 @@ dependencies = [
   "catboost>=1.2",
   "matplotlib>=3.9",
 ]
-
-[project.optional-dependencies]
 dashboard = ["streamlit>=1.37", "plotly>=5.23"]
 dev = ["pytest>=8.0", "ruff>=0.6"]
 

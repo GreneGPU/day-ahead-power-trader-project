@@ -9,6 +9,7 @@ import pandas as pd
 
 from .config import (
     BatterySettings,
+    BestHoursSettings,
     ChannelBreakoutSettings,
     DailySpreadSettings,
     EnsembleAgreementSettings,
@@ -31,6 +32,7 @@ from .research import (
 )
 from .trading import (
     BatteryConfig,
+    BestHoursConfig,
     ChannelBreakoutConfig,
     DailySpreadConfig,
     EnsembleAgreementConfig,
@@ -138,6 +140,7 @@ def generate_static_dashboard(
     momentum_spread_settings: MomentumSpreadSettings | None = None,
     channel_breakout_settings: ChannelBreakoutSettings | None = None,
     daily_spread_settings: DailySpreadSettings | None = None,
+    best_hours_settings: BestHoursSettings | None = None,
     ensemble_agreement_settings: EnsembleAgreementSettings | None = None,
 ) -> dict[str, object]:
     root = Path(results_dir)
@@ -158,6 +161,7 @@ def generate_static_dashboard(
     momentum_spread_cfg = momentum_spread_settings or MomentumSpreadSettings()
     breakout_cfg = channel_breakout_settings or ChannelBreakoutSettings()
     daily_cfg = daily_spread_settings or DailySpreadSettings()
+    best_hours_cfg = best_hours_settings or BestHoursSettings()
     ensemble_cfg = ensemble_agreement_settings or EnsembleAgreementSettings()
     battery_config = BatteryConfig(**cfg.__dict__)
     strategy_results = run_strategy_suite(
@@ -169,6 +173,7 @@ def generate_static_dashboard(
         mean_reversion_config=MeanReversionConfig(**mean_cfg.__dict__),
         breakout_config=ChannelBreakoutConfig(**breakout_cfg.__dict__),
         daily_spread_config=DailySpreadConfig(**daily_cfg.__dict__),
+        best_hours_config=BestHoursConfig(**best_hours_cfg.__dict__),
         momentum_config=MomentumConfig(**momentum_cfg.__dict__),
         momentum_spread_config=MomentumSpreadConfig(**momentum_spread_cfg.__dict__),
         ensemble_agreement_config=EnsembleAgreementConfig(**ensemble_cfg.__dict__),
