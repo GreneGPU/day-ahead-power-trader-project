@@ -13,7 +13,11 @@ from intraday_power_quant.imbalance_trading import (
     simulate_imbalance_spread_positions,
 )
 from intraday_power_quant.optimization import optimize_strategy_suite, run_strategy_parameter_sweep
-from intraday_power_quant.prop_trading import PropConfig, simulate_prop_positions
+from intraday_power_quant.prop_trading import (
+    PropConfig,
+    simulate_prop_positions,
+    simulate_prop_positions_with_eod_imbalance,
+)
 from intraday_power_quant.research import (
     daily_spread_robustness_grid,
     execution_cost_stress_table,
@@ -105,6 +109,48 @@ def test_prop_proxy_maps_signals_to_positions_and_charges_switching_costs():
     assert math.isclose(summary["total_cashflow"], 48.0)
     assert math.isclose(summary["return_pct"], 4.8)
     assert simulation["Position"].iloc[-1] == 0
+
+
+def test_prop_proxy_forces_each_day_flat_with_imbalance_settlement():
+    signals = pd.DataFrame(
+        {
+            "HourUTC": pd.to_datetime(
+                [
+                    "2026-01-01T22:30:00Z",
+                    "2026-01-01T22:45:00Z",
+                    "2026-01-01T23:00:00Z",
+                    "2026-01-01T23:15:00Z",
+                ]
+            ),
+            "Actual_Price": [100.0, 110.0, 90.0, 95.0],
+            "Imbalance_Price_DKK": [100.0, 130.0, 90.0, 80.0],
+            "Forecast_Price": [105.0, 120.0, 85.0, 80.0],
+            "Signal_Action": ["charge", "charge", "discharge", "discharge"],
+        }
+    )
+    simulation, summary = simulate_prop_positions_with_eod_imbalance(
+        signals,
+        PropConfig(
+            initial_capital_dkk=1_000.0,
+            position_size_mwh=2.0,
+            transaction_cost_dkk_per_mwh=1.0,
+            market_timezone="Europe/Copenhagen",
+        ),
+    )
+
+    assert simulation["Action"].tolist() == [
+        "long",
+        "imbalance-close-long",
+        "short",
+        "imbalance-close-short",
+    ]
+    assert simulation.loc[simulation["Is_Day_End"], "Position_After_Settlement"].eq(0).all()
+    assert simulation["EOD_Imbalance_Settlement"].tolist() == [False, True, False, True]
+    assert simulation["Price_Change_DKK"].tolist() == [10.0, 20.0, 5.0, -15.0]
+    assert math.isclose(summary["gross_cashflow"], 80.0)
+    assert math.isclose(summary["total_fee_cost"], 8.0)
+    assert math.isclose(summary["total_cashflow"], 72.0)
+    assert summary["eod_imbalance_settlements"] == 2
 
 
 def test_imbalance_proxy_settles_signals_against_realized_spread():

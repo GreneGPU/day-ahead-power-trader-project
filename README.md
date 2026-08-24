@@ -4,18 +4,18 @@ Transfer-learning 15-minute day-ahead electricity-price forecasting, physical ba
 
 Live dashboard: https://greneportfolio.vercel.app/
 
-The dashboard opens from precomputed battery and both Prop-settlement snapshots, so visiting or refreshing the
+The dashboard opens from precomputed battery and Prop snapshots, so visiting or refreshing the
 site does not rerun the strategy grids. Changing controls keeps the displayed snapshot in place and marks
 the settings as pending; `Compare strategies` is the explicit recalculation action. Strategy selection is
 instant because each comparison response contains the plotted series for every available strategy.
 
 The live dashboard offers two trading setups. `Physical battery` defaults to 90% round-trip efficiency and a 2026 DK1 distribution-connected fee assumption: 115.41 DKK/MWh while charging and 10.71 DKK/MWh while discharging. `Prop proxy` maps buy/charge signals to long day-ahead positions and sell/discharge signals to short positions, with editable capital, position size, transaction cost, and daily loss limit.
 
-The Prop setup has two settlement scenarios. `Closed: next-price proxy` uses the next observed day-ahead price move as a synthetic approximation of closing before delivery because historical intraday execution prices are unavailable. `Unclosed: imbalance at delivery` assumes every displayed position remains open into delivery: a long settles on `imbalance price - day-ahead price`, while a short settles on `day-ahead price - imbalance price`. The unclosed scenario is the default Prop view.
+The Prop setup uses one daily position lifecycle. Positions use the next observed day-ahead price move as a synthetic approximation of a pre-delivery close because historical intraday execution prices are unavailable. At the final DK1 interval of every local day, any remaining position is forced flat at the realized imbalance price: a residual long settles on `imbalance price - day-ahead price`, while a residual short settles on `day-ahead price - imbalance price`.
 
-The prop setup is deliberately labeled as a synthetic research proxy. The thesis dataset does not contain historical intraday entry or exit quotes, bid/ask spreads, margin, collateral, or liquidity, so its PnL is not presented as executable Nord Pool spot arbitrage. The unclosed scenario uses historical Energinet DK1 settlement prices, but realizing that settlement requires physical flexibility or a balance-responsible-party arrangement; activation, metering, collateral, nominations, BRP fees, and market impact are not modeled.
+The prop setup is deliberately labeled as a synthetic research proxy. The thesis dataset does not contain historical intraday entry or exit quotes, bid/ask spreads, margin, collateral, or liquidity, so its PnL is not presented as executable Nord Pool spot arbitrage. The end-of-day fallback uses historical Energinet DK1 settlement prices, but realizing that settlement requires physical flexibility or a balance-responsible-party arrangement; activation, metering, collateral, nominations, BRP fees, and market impact are not modeled.
 
-The physical-battery view deliberately preserves the original pre-settlement thesis price series, strategy calculations, and saved results. Imbalance data does not enter that calculation. Prop prices and forecasts are converted from EUR/MWh to DKK/MWh with the interval exchange rates implied by matching Energinet EUR and DKK fields, and its chart also shows the aligned imbalance price. The displayed model MAE and RMSE remain in the original EUR/MWh units used to train and evaluate the thesis models.
+The physical-battery view deliberately preserves the original pre-settlement thesis price series, strategy calculations, and saved results. Imbalance data does not enter that calculation. Prop prices and forecasts are converted from EUR/MWh to DKK/MWh with the interval exchange rates implied by matching Energinet EUR and DKK fields. The dashboard keeps day-ahead prices and forecasts together, and renders the aligned imbalance price in its own chart. The displayed model MAE and RMSE remain in the original EUR/MWh units used to train and evaluate the thesis models.
 
 Its default evaluation mode reserves the final ten complete DK1 calendar days as a chronological holdout: every strategy searches its parameter grid for the highest net cashflow on all earlier available observations, then the dashboard ranks strategies, calculates daily Sharpe, and shows trade logs using only those ten unseen days. A fixed-default mode remains available for comparison.
 
@@ -29,9 +29,9 @@ This repo turns the thesis notebook into a maintainable project:
 - configurable chronological validation split: fixed ratio or final N days
 - model-ranking metrics, coverage checks, leakage warnings, and ablation entry point
 - forecast-driven battery arbitrage simulator
-- asset-free long/short research proxy with capital return, transaction costs, loss limits, and forced flat close
-- unclosed-position settlement using aligned Energinet DK1 prices and forecast-only signals
-- separate perfect-foresight benchmarks for battery dispatch, synthetic pre-delivery closes, and unclosed delivery settlement
+- asset-free long/short research proxy with capital return, transaction costs, loss limits, and a daily close deadline
+- end-of-day fallback settlement using aligned Energinet DK1 prices and forecast-only signals
+- separate perfect-foresight benchmarks for battery dispatch and the daily Prop settlement lifecycle
 - selectable strategy suite with user-adjustable parameters
 - live strategy selection with per-interval charge/discharge logs and CSV export
 - DK1 actual-versus-prediction chart with charge and discharge execution markers
@@ -196,9 +196,8 @@ The Streamlit dashboard supports multiple dispatch strategies and day-ahead rese
 - `Wind-confirmed optimizer`: permits predicted-price optimizer actions only when day-ahead wind conditions confirm them.
 
 The deployed comparison reports setup-specific perfect-foresight benchmarks based on actual test prices.
-The battery view optimizes the realized dispatch path, the closed-position Prop scenario optimizes the
-realized long/flat/short path including switching costs, and the unclosed scenario chooses the profitable
-day-ahead position for each realized imbalance settlement. All are labeled as hindsight opportunity
+The battery view optimizes the realized dispatch path. The Prop benchmark optimizes each day's realized
+long/flat/short path, including switching costs and any final imbalance close. Both are labeled as hindsight opportunity
 ceilings and are not ranked as tradable strategies. For each strategy, the site also calculates a zero-cost counterfactual while retaining battery
 efficiency and degradation costs where applicable. In optimized mode, both cost-adjusted and zero-cost
 potential are re-optimized on the test period and labeled as hindsight-only.

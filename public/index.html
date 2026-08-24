@@ -63,6 +63,8 @@
     .card p { margin:4px 0 0; color:var(--muted); font-size:12px; }
     canvas { display:block; width:100%; height:300px; border-radius:10px; background:rgba(3,12,22,.45); }
     #cashflowChart { height:260px; }
+    #imbalanceChart { height:260px; }
+    .imbalance-card { grid-column:1/-1; }
     .cashflow-card { grid-column:2; grid-row:2; align-self:start; }
     .strategy-details-card { grid-column:1; grid-row:2; }
     .detail-metrics { grid-template-columns:repeat(4,minmax(0,1fr)); margin:10px 0 0; }
@@ -102,6 +104,7 @@
     .action-badge.long,.action-badge.long-spread { color:var(--green); background:rgba(63,224,157,.12); }
     .action-badge.short,.action-badge.short-spread { color:var(--red); background:rgba(255,107,122,.12); }
     .action-badge.exit,.action-badge.risk-off { color:var(--orange); background:rgba(255,181,95,.12); }
+    .action-badge.imbalance-close-long,.action-badge.imbalance-close-short { color:#06101d; background:var(--orange); }
     .strategy-guide { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); align-items:stretch; gap:12px; }
     .guide-item { display:grid; grid-template-rows:auto minmax(64px,1fr) auto auto; min-height:218px; padding:16px; border:1px solid var(--line); border-radius:12px; background:rgba(5,17,30,.48); }
     .guide-heading { display:flex; align-items:center; gap:10px; margin-bottom:7px; }
@@ -142,16 +145,14 @@
     <div data-setup-control="battery"><label for="roundTrip">Round-trip efficiency %</label><input id="roundTrip" type="number" min="1" max="100" step="1" value="90"></div>
     <div class="fee-control" data-setup-control="battery"><label for="chargeFee">Charge fees DKK/MWh</label><input id="chargeFee" type="number" min="0" step="0.01" value="115.41"></div>
     <div class="fee-control" data-setup-control="battery"><label for="dischargeFee">Discharge fees DKK/MWh</label><input id="dischargeFee" type="number" min="0" step="0.01" value="10.71"></div>
-    <div data-setup-control="prop imbalance" hidden><label for="startingCapital">Starting capital DKK</label><input id="startingCapital" type="number" min="1000" step="10000" value="100000"></div>
-    <div data-setup-control="prop imbalance" hidden><label for="propSettlement">Position settlement</label><select id="propSettlement"><option value="imbalance" selected>Unclosed: imbalance at delivery</option><option value="prop">Closed: next-price proxy</option></select></div>
-    <div data-setup-control="prop imbalance" hidden><label for="positionSize">Position size MWh</label><input id="positionSize" type="number" min="0.1" step="1" value="10"></div>
-    <div data-setup-control="prop imbalance" hidden><label for="transactionCost">Trading cost DKK/MWh</label><input id="transactionCost" type="number" min="0" step="0.01" value="0.41"></div>
-    <div class="fee-control" data-setup-control="prop imbalance" hidden><label for="dailyLossLimit">Daily loss limit DKK</label><input id="dailyLossLimit" type="number" min="0" step="500" value="5000"></div>
+    <div data-setup-control="prop" hidden><label for="startingCapital">Starting capital DKK</label><input id="startingCapital" type="number" min="1000" step="10000" value="100000"></div>
+    <div data-setup-control="prop" hidden><label for="positionSize">Position size MWh</label><input id="positionSize" type="number" min="0.1" step="1" value="10"></div>
+    <div data-setup-control="prop" hidden><label for="transactionCost">Trading cost DKK/MWh</label><input id="transactionCost" type="number" min="0" step="0.01" value="0.41"></div>
+    <div class="fee-control" data-setup-control="prop" hidden><label for="dailyLossLimit">Daily loss limit DKK</label><input id="dailyLossLimit" type="number" min="0" step="500" value="5000"></div>
     <button id="run">Compare strategies</button>
   </section>
   <div class="cost-note" id="batteryNote"><strong>DK1 2026 distribution-connected assumption:</strong> charge fee = Energinet system 72 + network 43 + Nord Pool 0.41; discharge fee = Energinet feed-in 5 + production balance 5.30 + Nord Pool 0.41 DKK/MWh. Excludes local DSO tariffs, electricity tax, VAT, fixed/capacity charges, imbalance costs, and Nord Pool currency service. The no-fee potential reruns each strategy with all three modeled trading fees set to zero; efficiency and degradation still apply. Sources: <a href="https://energinet.dk/media/ikylsqle/energinets_tarifkatalog_2026.pdf" target="_blank" rel="noreferrer">Energinet</a> and <a href="https://www.nordpoolgroup.com/4a7ad8/globalassets/trading-and-services/nord-pool-fee-schedule-2026-nordic-and-baltic-market.pdf" target="_blank" rel="noreferrer">Nord Pool</a>.</div>
-  <div class="cost-note" id="propNote" hidden><strong>Closed-position synthetic proxy:</strong> low-price signals become long and high-price signals become short for the next observed DK1 day-ahead price change. This scenario approximates closing before delivery because historical intraday execution prices are unavailable. It does not model bid/ask spread, margin, collateral, or liquidity.</div>
-  <div class="cost-note" id="imbalanceNote" hidden><strong>Unclosed position at delivery:</strong> a long day-ahead position settles on imbalance minus day-ahead price; a short settles on day-ahead minus imbalance price. The imbalance price is used only for settlement, never as signal information. This scenario assumes every signaled position shown remains unclosed into delivery and would require physical flexibility or a balance-responsible arrangement; collateral, nominations, activation, and BRP fees are not modeled.</div>
+  <div class="cost-note" id="propNote" hidden><strong>Daily Prop lifecycle:</strong> positions use the next observed day-ahead move as a synthetic pre-delivery close proxy. Any position still open at the final DK1 interval is automatically closed and settled at that interval's realized imbalance price, including the closing cost. Imbalance is settlement data only and never enters a strategy signal.</div>
   <div class="calculation-state" id="calculationState" role="status" aria-live="polite">
     <span class="calculation-spinner" aria-hidden="true"></span>
     <div><strong id="statusText">Loading saved results…</strong><small id="statusDetail">Reading the deployment snapshot. No optimization is running.</small></div>
@@ -168,7 +169,7 @@
 
   <section class="grid">
     <article class="card">
-      <div class="card-head"><div><h2 id="priceChartTitle">DK1 day-ahead price vs prediction</h2><p id="priceSubtitle">Saved 15-minute test forecast</p></div><div class="legend"><span class="actual">Day-ahead</span><span class="forecast" id="forecastLegend">Prediction</span><span class="imbalance" id="imbalanceLegend" hidden>Imbalance</span><span class="charge" id="buyLegend">Charge</span><span class="discharge" id="sellLegend">Discharge</span></div></div>
+      <div class="card-head"><div><h2 id="priceChartTitle">DK1 day-ahead price vs prediction</h2><p id="priceSubtitle">Saved 15-minute test forecast</p></div><div class="legend"><span class="actual">Day-ahead</span><span class="forecast" id="forecastLegend">Prediction</span><span class="charge" id="buyLegend">Charge</span><span class="discharge" id="sellLegend">Discharge</span></div></div>
       <canvas id="priceChart"></canvas>
     </article>
     <article class="card">
@@ -196,6 +197,11 @@
       <div class="settings-box"><span>Training-optimized parameters used for the out-of-sample test</span><code id="strategySettings">Loading…</code></div>
       <div class="settings-box"><span>Best test-grid parameters (hindsight only)</span><code id="testPotentialSettings">Loading…</code></div>
       <div class="settings-box"><span id="noCostSettingsLabel">No-fee potential parameters (hindsight only)</span><code id="noFeePotentialSettings">Loading…</code></div>
+    </article>
+
+    <article class="card imbalance-card" id="imbalanceChartCard" hidden>
+      <div class="card-head"><div><h2>DK1 imbalance settlement price</h2><p id="imbalanceSubtitle">Realized settlement price; not used to create signals</p></div><div class="legend"><span class="imbalance">Imbalance</span><span class="charge">EOD long close</span><span class="discharge">EOD short close</span></div></div>
+      <canvas id="imbalanceChart"></canvas>
     </article>
 
     <article class="card wide">
@@ -284,17 +290,16 @@ function updateSetupUI(){
   const visibleSetup=isDirectional()?'prop':'battery';
   document.querySelectorAll('[data-trading-setup]').forEach(button=>{const active=button.dataset.tradingSetup===visibleSetup;button.classList.toggle('active',active);button.setAttribute('aria-pressed',String(active))});
   document.querySelectorAll('[data-setup-control]').forEach(control=>{control.hidden=!control.dataset.setupControl.split(' ').includes(state.tradingSetup)});
-  if(isDirectional())$('#propSettlement').value=isImbalance()?'imbalance':'prop';
-  $('#batteryNote').hidden=state.tradingSetup!=='battery'; $('#propNote').hidden=!isProp(); $('#imbalanceNote').hidden=!isImbalance(); $('#forecastLegend').hidden=false; $('#imbalanceLegend').hidden=!isDirectional();
-  $('#priceChartTitle').textContent=isDirectional()?'Day-ahead, forecast, and imbalance prices':'DK1 day-ahead price vs prediction';
-  $('#pageLede').textContent=isImbalance()?'Test the fallback settlement when forecast-driven day-ahead prop positions remain open into delivery.':isProp()?'Compare forecast-driven long/short signals using a synthetic pre-delivery close proxy, capital limits, and trading costs.':'Compare forecast-driven battery strategies using the original pre-settlement thesis calculation, including battery losses and editable market and grid fees.';
-  $('#rankingSubtitle').textContent=isImbalance()?'Unclosed day-ahead positions settled at realized DK1 imbalance prices':isProp()?'Same forecast, synthetic position size, costs, and realized price moves':'Same forecast, battery, and realized DKK prices';
-  $('#buyLegend').textContent=isImbalance()?'Long unclosed':isProp()?'Long':'Charge'; $('#sellLegend').textContent=isImbalance()?'Short unclosed':isProp()?'Short':'Discharge';
-  $('#strategyGuideIntro').textContent=isImbalance()?'Buy/charge signals create long day-ahead positions and sell/discharge signals create short positions. This scenario assumes they remain unclosed into delivery; imbalance prices settle PnL and are never signal inputs.':isProp()?'Buy/charge signals become long positions and sell/discharge signals become short positions for the next realized DK1 price move, approximating a close before delivery.':'Charging means buying and storing electricity; discharging means selling it. Predictions choose the action, while realized DKK prices determine the displayed cashflow.';
-  $('#tradeLogTitle').textContent=isImbalance()?'Unclosed position settlement log':isProp()?'Closed-position proxy log':'Charge and discharge log';
-  $('#actualPriceHeader').textContent='Day-ahead'; $('#comparisonPriceHeader').textContent=isImbalance()?'Imbalance':'Forecast';
-  $('#exposureHeader').textContent=isDirectional()?'Position MWh':'Dispatch MW'; $('#stateHeader').textContent=isImbalance()?'Spread':isProp()?'Price move':'State of charge';
-  $('#buyActionHeader').textContent=isImbalance()?'Long unclosed':isProp()?'Long':'Charge'; $('#sellActionHeader').textContent=isImbalance()?'Short unclosed':isProp()?'Short':'Discharge'; $('#secondaryMetricHeader').textContent=isDirectional()?'Return':'Degradation';
+  $('#batteryNote').hidden=state.tradingSetup!=='battery'; $('#propNote').hidden=!isProp(); $('#imbalanceChartCard').hidden=!isProp(); $('#forecastLegend').hidden=false;
+  $('#priceChartTitle').textContent='DK1 day-ahead price vs prediction';
+  $('#pageLede').textContent=isProp()?'Compare forecast-driven long/short positions with a daily close deadline and realized DK1 imbalance fallback.':'Compare forecast-driven battery strategies using the original pre-settlement thesis calculation, including battery losses and editable market and grid fees.';
+  $('#rankingSubtitle').textContent=isProp()?'Same forecast, daily position lifecycle, costs, and realized settlement prices':'Same forecast, battery, and realized DKK prices';
+  $('#buyLegend').textContent=isProp()?'Long':'Charge'; $('#sellLegend').textContent=isProp()?'Short':'Discharge';
+  $('#strategyGuideIntro').textContent=isProp()?'Buy/charge signals become long positions and sell/discharge signals become short positions. Positions use the next realized DK1 day-ahead move until the daily deadline; anything still open then is settled at the realized imbalance price and forced flat.':'Charging means buying and storing electricity; discharging means selling it. Predictions choose the action, while realized DKK prices determine the displayed cashflow.';
+  $('#tradeLogTitle').textContent=isProp()?'Daily Prop position log':'Charge and discharge log';
+  $('#actualPriceHeader').textContent='Day-ahead'; $('#comparisonPriceHeader').textContent=isProp()?'Forecast / settlement':'Forecast';
+  $('#exposureHeader').textContent=isProp()?'Position MWh':'Dispatch MW'; $('#stateHeader').textContent=isProp()?'Price move / spread':'State of charge';
+  $('#buyActionHeader').textContent=isProp()?'Long':'Charge'; $('#sellActionHeader').textContent=isProp()?'Short':'Discharge'; $('#secondaryMetricHeader').textContent=isDirectional()?'Return':'Degradation';
   $('#noCostPotentialLabel').textContent=isDirectional()?'Potential without costs':'Potential without fees'; $('#noCostPotentialNote').textContent=isDirectional()?'Hindsight; trading cost set to 0':'Hindsight; modeled fees set to 0'; $('#noCostSettingsLabel').textContent=isDirectional()?'Zero-cost potential parameters (hindsight only)':'No-fee potential parameters (hindsight only)';
   $('#noCostTableHeader').textContent=isDirectional()?'Zero-cost potential':'No-fee potential';
 }
@@ -331,10 +336,14 @@ function renderPrice(){
   const names=actionNames();
   if(isDirectional()&&state.results?.prices){const imbalanceByTime=new Map(state.results.prices.map(row=>[new Date(row.HourUTC).getTime(),row.Imbalance_Price_DKK]));rows.forEach(row=>{row.Imbalance_Price_DKK=imbalanceByTime.get(new Date(row.HourUTC).getTime())})}
   const priceSeries=[{key:'Actual_Price',color:colors.actual,width:1.6},{key:'Forecast_Price',color:colors.forecast,width:1.8}];
-  if(isDirectional())priceSeries.push({key:'Imbalance_Price_DKK',color:colors.imbalance,width:1.7});
   priceSeries.push({type:'markers',key:'Actual_Price',action:names.buy,shape:'down',color:colors.charge},{type:'markers',key:'Actual_Price',action:names.sell,shape:'up',color:colors.discharge});
   drawLineChart($('#priceChart'),rows,priceSeries);
   if(rows.length){const start=new Date(rows[0].HourUTC).toLocaleDateString('en-DK');const end=new Date(rows.at(-1).HourUTC).toLocaleDateString('en-DK');const buys=rows.filter(row=>row.Action===names.buy).length,sells=rows.filter(row=>row.Action===names.sell).length;$('#priceSubtitle').textContent=`${rows.length.toLocaleString()} intervals · ${buys} ${names.buyLabel.toLowerCase()} · ${sells} ${names.sellLabel.toLowerCase()} · ${start} to ${end}`}
+  if(isProp()){
+    drawLineChart($('#imbalanceChart'),rows,[{key:'Imbalance_Price_DKK',color:colors.imbalance,width:1.9},{type:'markers',key:'Imbalance_Price_DKK',action:'imbalance-close-long',shape:'down',color:colors.charge},{type:'markers',key:'Imbalance_Price_DKK',action:'imbalance-close-short',shape:'up',color:colors.discharge}]);
+    const settlements=rows.filter(row=>row.EOD_Imbalance_Settlement).length;
+    $('#imbalanceSubtitle').textContent=`Realized settlement price · ${settlements} end-of-day imbalance ${settlements===1?'close':'closes'} · never used as a signal`;
+  }
 }
 
 function renderCashflow(){
@@ -356,18 +365,18 @@ function selectedTrades(){
 function renderTradeLog(){
   const data=state.comparison,trades=selectedTrades(),names=actionNames();
   $('#tradeCount').textContent=`${trades.length.toLocaleString()} ${isDirectional()?'position rows':'actions'}`;
-  $('#tradeSubtitle').textContent=`${data.selected_strategy} · ${data.evaluation.mode==='out_of_sample_optimization'?'unseen test period':'selected period'} · ${isImbalance()?'unclosed positions settled at delivery':isProp()?'synthetic pre-delivery close proxy':'prices and cashflow'} in DKK/MWh and DKK`;
+  $('#tradeSubtitle').textContent=`${data.selected_strategy} · ${data.evaluation.mode==='out_of_sample_optimization'?'unseen test period':'selected period'} · ${isProp()?'pre-delivery proxy with EOD imbalance fallback':'prices and cashflow'} in DKK/MWh and DKK`;
   $('#downloadLog').disabled=!trades.length;
   $('#tradeRows').innerHTML=trades.length?trades.map(row=>{
     const time=new Date(row.HourUTC).toLocaleString('en-DK',{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});
-    const exposure=isDirectional()?fmt(Math.abs(row.Position_MWh),2):fmt(Math.abs(row.Dispatch_MW),2); const stateValue=isDirectional()?`${fmt(row.Price_Change_DKK,2)} DKK`:`${fmt(row.State_Of_Charge_MWh,2)} MWh`; const comparisonPrice=isImbalance()?row.Imbalance_Price_DKK:row.Forecast_Price; const actionLabel=row.Action===names.buy?names.buyLabel:row.Action===names.sell?names.sellLabel:row.Action;
+    const exposure=isDirectional()?fmt(Math.abs(row.Position_MWh),2):fmt(Math.abs(row.Dispatch_MW),2); const stateValue=isDirectional()?`${fmt(row.Price_Change_DKK,2)} DKK`:`${fmt(row.State_Of_Charge_MWh,2)} MWh`; const comparisonPrice=row.EOD_Imbalance_Settlement?row.Imbalance_Price_DKK:row.Forecast_Price; const actionLabel=row.Action===names.buy?names.buyLabel:row.Action===names.sell?names.sellLabel:row.Action==='imbalance-close-long'?'EOD long → imbalance':row.Action==='imbalance-close-short'?'EOD short → imbalance':row.Action;
     return `<tr><td>${time}</td><td><span class="action-badge ${row.Action}">${actionLabel}</span></td><td class="num">${fmt(row.Actual_Price,2)}</td><td class="num">${fmt(comparisonPrice,2)}</td><td class="num">${exposure}</td><td class="num">${stateValue}</td><td class="num ${row.Cashflow>=0?'positive':'negative-text'}">${cash(row.Cashflow)}</td><td class="num ${row.Cumulative_Cashflow>=0?'positive':'negative-text'}">${cash(row.Cumulative_Cashflow)}</td></tr>`;
-  }).join(''):`<tr><td colspan="8">No ${isImbalance()?'unclosed positions':isProp()?'long or short positions':'charge or discharge actions'} occurred for this strategy and window.</td></tr>`;
+  }).join(''):`<tr><td colspan="8">No ${isProp()?'long or short positions':'charge or discharge actions'} occurred for this strategy and window.</td></tr>`;
 }
 
 function downloadTradeLog(){
   const trades=selectedTrades(); if(!trades.length)return;
-  const columns=isImbalance()?['HourUTC','Action','Actual_Price','Forecast_Price','Imbalance_Price_DKK','Imbalance_Spread_DKK','Dominating_Direction','Position','Position_MWh','Gross_Cashflow','Transaction_Cost','Cashflow','Cumulative_Cashflow','Equity_DKK']:isProp()?['HourUTC','Action','Actual_Price','Forecast_Price','Position','Position_MWh','Price_Change_DKK','Gross_Cashflow','Transaction_Cost','Cashflow','Cumulative_Cashflow','Equity_DKK']:['HourUTC','Action','Actual_Price','Forecast_Price','Dispatch_MW','State_Of_Charge_MWh','Cashflow','Cumulative_Cashflow'];
+  const columns=isProp()?['HourUTC','Action','Settlement_Basis','Actual_Price','Forecast_Price','Imbalance_Price_DKK','Imbalance_Spread_DKK','Dominating_Direction','Position','Position_MWh','Position_After_Settlement','EOD_Imbalance_Settlement','Price_Change_DKK','Gross_Cashflow','Transaction_Cost','Cashflow','Cumulative_Cashflow','Equity_DKK']:isImbalance()?['HourUTC','Action','Actual_Price','Forecast_Price','Imbalance_Price_DKK','Imbalance_Spread_DKK','Dominating_Direction','Position','Position_MWh','Gross_Cashflow','Transaction_Cost','Cashflow','Cumulative_Cashflow','Equity_DKK']:['HourUTC','Action','Actual_Price','Forecast_Price','Dispatch_MW','State_Of_Charge_MWh','Cashflow','Cumulative_Cashflow'];
   const csv=[columns.join(','),...trades.map(row=>columns.map(column=>`"${String(row[column]??'').replaceAll('"','""')}"`).join(','))].join('\n');
   const url=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'})); const link=document.createElement('a');
   link.href=url; link.download=`${state.comparison.selected_strategy.toLowerCase().replaceAll(' ','-')}-trade-log.csv`; link.click(); URL.revokeObjectURL(url);
@@ -384,8 +393,8 @@ function renderComparison(){
   const selectedIndex=rows.findIndex(row=>row.Strategy===data.selected_strategy),selected=rows[selectedIndex];
   $('#bestStrategy').textContent=selected.Strategy; $('#bestCashflow').textContent=cash(selected.Cashflow); $('#bestDrawdown').textContent=cash(selected.Max_Drawdown);
   $('#bestStrategyNote').textContent=`Rank #${selectedIndex+1} · ${data.forecast_model}`; $('#trainCashflow').textContent=cash(selected.Train_Cashflow); $('#testPotentialCashflow').textContent=cash(selected.Test_Potential_Cashflow); $('#noFeePotentialCashflow').textContent=cash(selected.No_Fee_Potential_Cashflow); $('#oracleCashflow').textContent=cash(data.perfect_foresight_benchmark?.Cashflow); $('#activeIntervals').textContent=fmt(selected.Active_Intervals,0); $('#riskScore').textContent=cash(selected.Risk_Adjusted_Score);
-  $('#dailySharpe').textContent=fmt(selected.Daily_Sharpe,2); $('#dailySharpeLabel').textContent=`${data.evaluation.daily_observations}-day daily Sharpe`; $('#dailySharpeHeader').textContent=`${data.evaluation.daily_observations}-day Sharpe`; $('#sharpeNote').textContent=`${data.evaluation.daily_observations} complete daily observations · annualized`; $('#modeledFees').textContent=cash(selected.Fee_Cost); $('#strategyDescription').textContent=selected.Description; $('#strategySettings').textContent=selected.Settings; $('#testPotentialSettings').textContent=selected.Test_Potential_Settings||'Available only in optimized mode'; $('#noFeePotentialSettings').textContent=selected.No_Fee_Potential_Settings||'Unavailable'; $('#cashSubtitle').textContent=`${selected.Strategy} · ${data.dataset.selected_rows.toLocaleString()} ${data.evaluation.mode==='out_of_sample_optimization'?'unseen test':'evaluation'} intervals · ${isImbalance()?'unclosed-at-delivery settlement':isProp()?'synthetic pre-delivery close proxy':'physical battery cashflow'}`;
-  if(isDirectional()){$('#capitalMetricLabel').textContent='Ending equity';$('#capitalMetricValue').textContent=cash(selected.Ending_Equity_DKK);$('#capitalMetricNote').textContent=`Started with ${cash(data.prop.initial_capital_dkk)}`;$('#setupMetricLabel').textContent='Return on capital';$('#setupMetricValue').textContent=pct(selected.Return_Pct);$('#setupMetricNote').textContent=`${fmt(data.prop.position_size_mwh,1)} MWh ${isImbalance()?'unclosed':'directional'} position`;$('#costMetricLabel').textContent='Trading costs';$('#costMetricNote').textContent=isImbalance()?'Active MWh × selected cost':'Position changes × selected cost';$('#oracleNote').textContent=isImbalance()?'Hindsight best settlement side':'Hindsight long/flat/short path';$('#activeIntervalsNote').textContent=isImbalance()?'Long unclosed + short unclosed':'Long + short';}
+  $('#dailySharpe').textContent=fmt(selected.Daily_Sharpe,2); $('#dailySharpeLabel').textContent=`${data.evaluation.daily_observations}-day daily Sharpe`; $('#dailySharpeHeader').textContent=`${data.evaluation.daily_observations}-day Sharpe`; $('#sharpeNote').textContent=`${data.evaluation.daily_observations} complete daily observations · annualized`; $('#modeledFees').textContent=cash(selected.Fee_Cost); $('#strategyDescription').textContent=selected.Description; $('#strategySettings').textContent=selected.Settings; $('#testPotentialSettings').textContent=selected.Test_Potential_Settings||'Available only in optimized mode'; $('#noFeePotentialSettings').textContent=selected.No_Fee_Potential_Settings||'Unavailable'; $('#cashSubtitle').textContent=`${selected.Strategy} · ${data.dataset.selected_rows.toLocaleString()} ${data.evaluation.mode==='out_of_sample_optimization'?'unseen test':'evaluation'} intervals · ${isProp()?'daily close with imbalance fallback':'physical battery cashflow'}`;
+  if(isDirectional()){$('#capitalMetricLabel').textContent='Ending equity';$('#capitalMetricValue').textContent=cash(selected.Ending_Equity_DKK);$('#capitalMetricNote').textContent=`Started with ${cash(data.prop.initial_capital_dkk)}`;$('#setupMetricLabel').textContent='Return on capital';$('#setupMetricValue').textContent=pct(selected.Return_Pct);$('#setupMetricNote').textContent=`${fmt(data.prop.position_size_mwh,1)} MWh directional position`;$('#costMetricLabel').textContent='Trading costs';$('#costMetricNote').textContent='Position changes and EOD closes';$('#oracleNote').textContent='Hindsight daily path under the same close rule';$('#activeIntervalsNote').textContent='Long + short';}
   else{$('#capitalMetricLabel').textContent='Final state of charge';$('#capitalMetricValue').textContent=fmt(selected.Final_SOC_MWh,1);$('#capitalMetricNote').textContent='MWh';$('#setupMetricLabel').textContent='Round-trip efficiency';$('#setupMetricValue').textContent=`${fmt(selected.Round_Trip_Efficiency_Pct,1)}%`;$('#setupMetricNote').textContent='Charge × discharge efficiency';$('#costMetricLabel').textContent='Modeled fees';$('#costMetricNote').textContent='Included in net cashflow';$('#oracleNote').textContent='Actual-price DP benchmark';$('#activeIntervalsNote').textContent='Charge + discharge';}
   const evaluation=data.evaluation;
   if(evaluation.mode==='out_of_sample_optimization'){
@@ -395,18 +404,18 @@ function renderComparison(){
   const maxAbs=Math.max(...rows.map(row=>Math.abs(row.Cashflow)),1);
   $('#ranking').innerHTML=rows.slice(0,8).map((row,index)=>`<div class="rank-row"><span class="rank">${index+1}</span><span class="rank-name" title="${row.Strategy}">${row.Strategy}</span><span class="bar-track"><span class="bar ${row.Cashflow<0?'negative':''}" style="width:${Math.max(3,Math.abs(row.Cashflow)/maxAbs*100)}%"></span></span><span class="rank-value ${row.Cashflow>=0?'positive':'negative-text'}">${dkk.format(row.Cashflow)}</span></div>`).join('');
   $('#strategyRows').innerHTML=rows.map((row,index)=>{const uplift=row.Test_Potential_Cashflow==null?null:row.Test_Potential_Cashflow-row.Cashflow;const secondary=isDirectional()?pct(row.Return_Pct):cash(row.Degradation_Cost);return `<tr class="strategy-row ${row.Strategy===selected.Strategy?'selected-row':''}" data-strategy="${row.Strategy}" title="Click to inspect this strategy"><td>${index+1}</td><td>${row.Strategy}</td><td class="num ${row.Cashflow>=0?'positive':'negative-text'}">${cash(row.Cashflow)}</td><td class="num">${cash(row.Train_Cashflow)}</td><td class="num ${row.Test_Potential_Cashflow>=0?'positive':'negative-text'}">${cash(row.Test_Potential_Cashflow)}</td><td class="num">${cash(uplift)}</td><td class="num ${row.No_Fee_Potential_Cashflow>=0?'positive':'negative-text'}">${cash(row.No_Fee_Potential_Cashflow)}</td><td class="num">${cash(row.Fee_Cost)}</td><td class="num">${secondary}</td><td class="num">${cash(row.Max_Drawdown)}</td><td class="num">${cash(row.Risk_Adjusted_Score)}</td><td class="num">${fmt(row.Daily_Sharpe,2)}</td><td class="num">${fmt(row.Active_Intervals,0)}</td><td class="num">${fmt(row.Charge_Intervals,0)}</td><td class="num">${fmt(row.Discharge_Intervals,0)}</td></tr>`}).join('');
-  $('#strategyGuide').innerHTML=rows.map((row,index)=>`<section class="guide-item"><div class="guide-heading"><span class="guide-rank">${index+1}</span><h3>${row.Strategy}</h3></div><p>${row.Description}</p><div class="guide-result"><span>${evaluation.mode==='out_of_sample_optimization'?'OOS test':'This run'}: <strong class="${row.Cashflow>=0?'positive':'negative-text'}">${cash(row.Cashflow)}</strong></span><span>Best test-grid PnL: <strong>${cash(row.Test_Potential_Cashflow)}</strong></span><span>${isDirectional()?'Zero-cost':'No-fee'} potential: <strong>${cash(row.No_Fee_Potential_Cashflow)}</strong></span><span><strong>${fmt(row.Active_Intervals,0)}</strong> ${isImbalance()?'unclosed positions':isProp()?'long/short intervals':'charge/discharge actions'}</span></div><div class="guide-settings">${row.Settings}</div></section>`).join('');
+  $('#strategyGuide').innerHTML=rows.map((row,index)=>`<section class="guide-item"><div class="guide-heading"><span class="guide-rank">${index+1}</span><h3>${row.Strategy}</h3></div><p>${row.Description}</p><div class="guide-result"><span>${evaluation.mode==='out_of_sample_optimization'?'OOS test':'This run'}: <strong class="${row.Cashflow>=0?'positive':'negative-text'}">${cash(row.Cashflow)}</strong></span><span>Best test-grid PnL: <strong>${cash(row.Test_Potential_Cashflow)}</strong></span><span>${isDirectional()?'Zero-cost':'No-fee'} potential: <strong>${cash(row.No_Fee_Potential_Cashflow)}</strong></span><span><strong>${fmt(row.Active_Intervals,0)}</strong> ${isProp()?'long/short intervals':'charge/discharge actions'}</span></div><div class="guide-settings">${row.Settings}</div></section>`).join('');
   renderCashflow(); renderTradeLog();
 }
 
 function renderSourceNote(){
   if(!state.results)return;
   const data=state.results.dataset;
-  $('#sourceNote').textContent=`Source: ${data.source_forecast_file} · ${data.rows.toLocaleString()} saved prediction intervals · ${isDirectional()?'Prop prices converted from EUR to DKK with interval exchange rates.':'Battery results use the original pre-settlement thesis price basis.'} ${isImbalance()?'Unclosed day-ahead positions settle using Energinet DK1 imbalance prices; requires physical flexibility or a BRP arrangement.':isProp()?'Synthetic pre-delivery close accounting; not an executable financial-contract backtest.':'Physical battery calculations are isolated from imbalance settlement.'} Research tooling only.`;
+  $('#sourceNote').textContent=`Source: ${data.source_forecast_file} · ${data.rows.toLocaleString()} saved prediction intervals · ${isProp()?'Prop prices are converted from EUR to DKK; realized Energinet DK1 imbalance prices settle only positions left open at the daily deadline. Synthetic proxy, not an executable financial-contract backtest.':'Battery results use the original pre-settlement thesis price basis and are isolated from imbalance settlement.'} Research tooling only.`;
 }
 
 function readyStatus(source='calculated'){
-  const comparison=state.comparison,roundTrip=comparison.battery.charge_efficiency*comparison.battery.discharge_efficiency,setupStatus=isDirectional()?`${fmt(comparison.prop.position_size_mwh,1)} MWh ${isImbalance()?'unclosed ':''}positions · cost-adjusted and zero-cost potential`:`${fmt(roundTrip*100,1)}% round trip · fee-adjusted and zero-fee potential`;
+  const comparison=state.comparison,roundTrip=comparison.battery.charge_efficiency*comparison.battery.discharge_efficiency,setupStatus=isDirectional()?`${fmt(comparison.prop.position_size_mwh,1)} MWh positions · daily close rule · cost-adjusted and zero-cost potential`:`${fmt(roundTrip*100,1)}% round trip · fee-adjusted and zero-fee potential`;
   $('#calculationElapsed').textContent=source==='saved'?'Saved':'Complete';
   setStatus(source==='saved'?'Saved results displayed':'Results ready','ok',`${comparison.selected_strategy} selected · ${comparison.evaluation.mode==='out_of_sample_optimization'?'out-of-sample optimized':'fixed defaults'} · ${setupStatus}.`);
 }
@@ -452,14 +461,12 @@ async function loadDashboard(){
 }
 
 function setTradingSetup(setup){
-  const resolved=setup==='prop'?$('#propSettlement').value:setup;
-  if(resolved===state.tradingSetup)return;
-  loadSavedDashboard(resolved);
+  if(setup===state.tradingSetup)return;
+  loadSavedDashboard(setup);
 }
 
 $('#run').addEventListener('click',loadDashboard); $('#strategy').addEventListener('change',event=>selectStrategy(event.target.value)); $('#downloadLog').addEventListener('click',downloadTradeLog);
 document.querySelectorAll('#forecast,#mode,#window').forEach(control=>control.addEventListener('change',markDirty));
-$('#propSettlement').addEventListener('change',event=>loadSavedDashboard(event.target.value));
 document.querySelectorAll('.controls input').forEach(control=>control.addEventListener('input',markDirty));
 document.querySelectorAll('[data-trading-setup]').forEach(button=>button.addEventListener('click',()=>setTradingSetup(button.dataset.tradingSetup)));
 $('#strategyRows').addEventListener('click',event=>{const row=event.target.closest('tr[data-strategy]');if(!row)return;$('#strategy').value=row.dataset.strategy;selectStrategy(row.dataset.strategy)});

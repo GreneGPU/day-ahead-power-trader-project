@@ -183,10 +183,22 @@ def test_prop_comparison_returns_directional_accounting() -> None:
     )
     assert selected["Return_Pct"] is not None
     assert selected["Degradation_Cost"] == 0
-    assert payload["selected_strategy_series"][-1]["Position"] == 0
+    day_ends = [
+        row for row in payload["selected_strategy_series"] if row["Is_Day_End"]
+    ]
+    assert day_ends
+    assert all(row["Position_After_Settlement"] == 0 for row in day_ends)
+    assert any(row["EOD_Imbalance_Settlement"] for row in day_ends)
     assert any(
         row["Action"] in {"long", "short"} for row in payload["selected_strategy_series"]
     )
+    assert {
+        "Imbalance_Price_DKK",
+        "Imbalance_Spread_DKK",
+        "Position_After_Settlement",
+        "EOD_Imbalance_Settlement",
+        "Settlement_Basis",
+    }.issubset(payload["selected_strategy_series"][0])
     assert payload["perfect_foresight_benchmark"]["label"] == (
         "Perfect-foresight directional ceiling"
     )

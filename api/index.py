@@ -26,8 +26,8 @@ from intraday_power_quant.imbalance_trading import (
 )
 from intraday_power_quant.prop_trading import (
     PropConfig,
-    simulate_prop_perfect_foresight,
-    simulate_prop_positions,
+    simulate_prop_eod_perfect_foresight,
+    simulate_prop_positions_with_eod_imbalance,
 )
 from intraday_power_quant.risk import summarize_cashflow_risk
 from intraday_power_quant.trading import (
@@ -347,12 +347,16 @@ def compare_strategies(payload: StrategyComparisonRequest) -> dict[str, Any]:
         def prop_transform(
             simulation: pd.DataFrame, _summary: dict[str, float]
         ) -> tuple[pd.DataFrame, dict[str, float]]:
-            return simulate_prop_positions(simulation, prop)
+            return simulate_prop_positions_with_eod_imbalance(
+                attach_imbalance_settlement(simulation), prop
+            )
 
         def no_fee_prop_transform(
             simulation: pd.DataFrame, _summary: dict[str, float]
         ) -> tuple[pd.DataFrame, dict[str, float]]:
-            return simulate_prop_positions(simulation, no_fee_prop)
+            return simulate_prop_positions_with_eod_imbalance(
+                attach_imbalance_settlement(simulation), no_fee_prop
+            )
 
         imbalance_reference = forecasts[
             ["HourUTC", "Imbalance_Price_DKK", "Dominating_Direction"]
@@ -532,7 +536,9 @@ def compare_strategies(payload: StrategyComparisonRequest) -> dict[str, Any]:
         if is_prop:
             description += (
                 " In the prop proxy, buy/charge signals map to long positions and "
-                "sell/discharge signals map to short positions for the next price move."
+                "sell/discharge signals map to short positions for the next price move. "
+                "Any position still open at the final DK1 interval is forced flat using "
+                "that interval's realized imbalance price."
             )
         elif is_imbalance:
             description += (
@@ -580,7 +586,7 @@ def compare_strategies(payload: StrategyComparisonRequest) -> dict[str, Any]:
     selected_simulation = simulations[selected_name].copy()
     selected_simulation["Cumulative_Cashflow"] = selected_simulation["Cashflow"].cumsum()
     if is_prop:
-        oracle_simulation, oracle_summary = simulate_prop_perfect_foresight(
+        oracle_simulation, oracle_summary = simulate_prop_eod_perfect_foresight(
             selected,
             config=prop,
             forecast_col=payload.forecast_col,
@@ -614,6 +620,7 @@ def compare_strategies(payload: StrategyComparisonRequest) -> dict[str, Any]:
         "Cumulative_Cashflow",
         "Position",
         "Position_MWh",
+        "Position_After_Settlement",
         "Price_Change_DKK",
         "Day_Ahead_Price_DKK",
         "Imbalance_Price_DKK",
@@ -622,6 +629,9 @@ def compare_strategies(payload: StrategyComparisonRequest) -> dict[str, Any]:
         "Gross_Cashflow",
         "Transaction_Cost",
         "Equity_DKK",
+        "Is_Day_End",
+        "EOD_Imbalance_Settlement",
+        "Settlement_Basis",
     ]
     best_series_columns = [column for column in series_columns if column in best_simulation.columns]
     selected_series_columns = [
@@ -689,7 +699,8 @@ def compare_strategies(payload: StrategyComparisonRequest) -> dict[str, Any]:
                 "Final_SOC_MWh": float(oracle_summary["final_soc_mwh"]),
                 "Description": (
                     "Selects the hindsight-optimal long/flat/short path directly from realized "
-                    "price changes, including switching costs. It is not tradable."
+                    "price changes and end-of-day imbalance spreads, including switching and "
+                    "closing costs. It is not tradable."
                     if is_prop
                     else "Selects the hindsight-profitable day-ahead position for each realized "
                     "imbalance settlement with costs included. It is not a tradable strategy."
@@ -748,7 +759,7 @@ def simulate(payload: SimulationRequest) -> dict[str, Any]:
             forecast_col=payload.forecast_col,
         )
         if trading_setup == "prop":
-            intervals, summary = simulate_prop_positions(
+            intervals, summary = simulate_prop_positions_with_eod_imbalance(
                 intervals,
                 PropConfig(**payload.prop),
                 time_col=payload.time_col,
