@@ -55,7 +55,7 @@ from intraday_power_quant.trading import (
 
 app = FastAPI(
     title="Day-Ahead Power Trading API",
-    description="Vercel API for battery, directional, and imbalance-spread strategy simulations.",
+    description="Vercel API for battery strategies and directional positions with configurable delivery settlement.",
     version="0.1.0",
     docs_url="/api/docs",
     openapi_url="/api/openapi.json",
@@ -528,9 +528,10 @@ def compare_strategies(payload: StrategyComparisonRequest) -> dict[str, Any]:
             )
         elif is_imbalance:
             description += (
-                " In the imbalance proxy, buy/charge signals take the long side and "
-                "sell/discharge signals take the short side of the same-interval DK1 "
-                "imbalance-minus-day-ahead spread."
+                " In the unclosed-position scenario, buy/charge signals create long "
+                "day-ahead positions and sell/discharge signals create short positions. "
+                "They remain open into delivery and settle against the same-interval DK1 "
+                "imbalance price."
             )
         if name == "Ensemble agreement" and int(summary.get("model_count", 0)) == 1:
             description += (
@@ -665,7 +666,7 @@ def compare_strategies(payload: StrategyComparisonRequest) -> dict[str, Any]:
                 "label": (
                     "Perfect-foresight directional ceiling"
                     if is_prop
-                    else "Perfect-foresight imbalance-spread ceiling"
+                    else "Perfect-foresight unclosed-position settlement ceiling"
                     if is_imbalance
                     else "Perfect-foresight DP ceiling"
                 ),
@@ -679,8 +680,8 @@ def compare_strategies(payload: StrategyComparisonRequest) -> dict[str, Any]:
                     "Selects the hindsight-optimal long/flat/short path directly from realized "
                     "price changes, including switching costs. It is not tradable."
                     if is_prop
-                    else "Selects the profitable side of each realized imbalance spread with "
-                    "costs included. It is a hindsight ceiling and not a tradable strategy."
+                    else "Selects the hindsight-profitable day-ahead position for each realized "
+                    "imbalance settlement with costs included. It is not a tradable strategy."
                     if is_imbalance
                     else "Optimizes directly on realized test prices. This is a hindsight opportunity "
                     "ceiling, not a tradable strategy or forecast result."

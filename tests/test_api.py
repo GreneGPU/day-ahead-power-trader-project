@@ -221,7 +221,7 @@ def test_imbalance_comparison_returns_spread_accounting() -> None:
     assert payload["trading_setup"] == "imbalance"
     assert len(payload["strategies"]) == 12
     assert payload["perfect_foresight_benchmark"]["label"] == (
-        "Perfect-foresight imbalance-spread ceiling"
+        "Perfect-foresight unclosed-position settlement ceiling"
     )
     selected = payload["selected_strategy_series"]
     assert any(row["Action"] in {"long-spread", "short-spread"} for row in selected)

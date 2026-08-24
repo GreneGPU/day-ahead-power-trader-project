@@ -51,7 +51,12 @@ def build_snapshot(trading_setup: str) -> dict[str, object]:
 def main() -> None:
     output_dir = PROJECT_ROOT / "deployment_data"
     output_dir.mkdir(parents=True, exist_ok=True)
-    for setup in ("battery", "prop", "imbalance"):
+    available = ("battery", "prop", "imbalance")
+    requested = tuple(sys.argv[1:]) or available
+    unknown = [setup for setup in requested if setup not in available]
+    if unknown:
+        raise ValueError(f"Unknown trading setup(s): {', '.join(unknown)}")
+    for setup in requested:
         output_path = output_dir / f"default_{setup}_comparison.json.gz"
         with gzip.open(output_path, "wt", encoding="utf-8", compresslevel=9) as handle:
             json.dump(build_snapshot(setup), handle, separators=(",", ":"), allow_nan=False)

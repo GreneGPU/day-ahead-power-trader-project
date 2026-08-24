@@ -15,7 +15,7 @@ def simulate_imbalance_spread_positions(
     day_ahead_col: str = "Actual_Price",
     imbalance_col: str = "Imbalance_Price_DKK",
 ) -> tuple[pd.DataFrame, dict[str, float]]:
-    """Settle synthetic long/short signals against the same-interval imbalance spread."""
+    """Settle day-ahead positions left unclosed into delivery at the imbalance price."""
 
     cfg = config or PropConfig()
     _validate_config(cfg)
@@ -114,7 +114,7 @@ def simulate_imbalance_perfect_foresight(
     imbalance_col: str = "Imbalance_Price_DKK",
     forecast_col: str = "Prediction",
 ) -> tuple[pd.DataFrame, dict[str, float]]:
-    """Choose the hindsight-optimal side of each realized imbalance spread."""
+    """Choose the hindsight-optimal unclosed position for each delivery interval."""
 
     cfg = config or PropConfig()
     _validate_config(cfg)
