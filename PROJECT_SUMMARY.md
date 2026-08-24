@@ -2,7 +2,7 @@
 
 ## What This Is
 
-`Day-Ahead Power Trader Project` is a portfolio-grade extension of the master-thesis notebook. It converts the one-cell notebook into a reusable Python project for 15-minute day-ahead DK1 electricity-price forecasting, transfer-learning evaluation, and forecast-driven flexibility simulation.
+`Day-Ahead Power Trading Project` is a portfolio-grade extension of the master-thesis notebook. It converts the one-cell notebook into a reusable Python project for 15-minute day-ahead DK1 electricity-price forecasting, transfer-learning evaluation, and forecast-driven flexibility simulation.
 
 ## Validation Setup
 

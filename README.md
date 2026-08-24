@@ -1,4 +1,4 @@
-# Day-Ahead Power Trader Project
+# Day-Ahead Power Trading Project
 
 Transfer-learning 15-minute day-ahead electricity-price forecasting, physical battery optimization, and synthetic proprietary-trading research for DK1/DK2-style power markets.
 

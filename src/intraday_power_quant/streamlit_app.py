@@ -55,7 +55,7 @@ DEFAULT_ENSEMBLE = EnsembleAgreementConfig()
 DEFAULT_RESULTS_DIR = "outputs/model_run_last30" if Path("outputs/model_run_last30").exists() else "outputs/model_run"
 
 
-st.set_page_config(page_title="Day-Ahead Power Trader Project", layout="wide")
+st.set_page_config(page_title="Day-Ahead Power Trading Project", layout="wide")
 
 
 @st.cache_data(show_spinner=False)
@@ -134,7 +134,7 @@ def research_results(forecasts: pd.DataFrame, battery_payload: dict[str, float |
     return cash_best, risk_best, sharpe_best, walk_forward, cost_stress, robustness, regimes, uncertainty, decision
 
 
-st.title("Day-Ahead Power Trader Project")
+st.title("Day-Ahead Power Trading Project")
 st.caption("15-minute day-ahead forecast comparison, transfer-learning metrics, and flexibility simulation.")
 
 with st.sidebar:

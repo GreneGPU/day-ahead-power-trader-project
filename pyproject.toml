@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "intraday-power-quant"
 version = "0.1.0"
-description = "Day-Ahead Power Trader Project: transfer-learning 15-minute power-price forecasting and flexibility simulation."
+description = "Day-Ahead Power Trading Project: transfer-learning 15-minute power-price forecasting and flexibility simulation."
 requires-python = ">=3.10"
 dependencies = [
   "pandas>=2.2",

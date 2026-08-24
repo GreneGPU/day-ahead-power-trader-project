@@ -405,7 +405,7 @@ def generate_static_dashboard(
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Day-Ahead Power Trader Project Dashboard</title>
+  <title>Day-Ahead Power Trading Project Dashboard</title>
   <style>
     :root {{
       color-scheme: light dark;
@@ -600,7 +600,7 @@ def generate_static_dashboard(
 <main>
   <header>
     <div>
-      <h1>Day-Ahead Power Trader Project</h1>
+      <h1>Day-Ahead Power Trading Project</h1>
       <p>15-minute day-ahead DK1 forecast comparison, transfer-learning metrics, and battery dispatch research.</p>
     </div>
     <p>{html.escape(test_start.strftime("%Y-%m-%d %H:%M"))} to {html.escape(test_end.strftime("%Y-%m-%d %H:%M"))}</p>
@@ -1213,7 +1213,7 @@ def generate_markdown_report(
             f"{row['Strategy']} -> {row['Action']}, dispatch {_format_number(float(row['Dispatch_MW']), 2)} MW, "
             f"forecast {_format_number(float(row['Forecast_Price']), 2)}"
         )
-    text = f"""# Day-Ahead Power Trader Project Report
+    text = f"""# Day-Ahead Power Trading Project Report
 
 ## Current model-run baseline
 

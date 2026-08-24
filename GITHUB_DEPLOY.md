@@ -38,7 +38,7 @@ From this folder:
 git init
 git branch -M main
 git add .
-git commit -m "Initial Day-Ahead Power Trader Project"
+git commit -m "Initial Day-Ahead Power Trading Project"
 git remote add origin https://github.com/YOUR_USERNAME/day-ahead-power-trader-project.git
 git push -u origin main
 ```

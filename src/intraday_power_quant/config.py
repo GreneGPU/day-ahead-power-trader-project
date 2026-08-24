@@ -158,7 +158,7 @@ class WindConfirmedOptimizerSettings:
 
 @dataclass(frozen=True)
 class ProjectConfig:
-    project_name: str = "Day-Ahead Power Trader Project"
+    project_name: str = "Day-Ahead Power Trading Project"
     data_dir: Path = Path("data/raw")
     reference_results_dir: Path = Path("outputs")
     output_dir: Path = Path("outputs/model_run")

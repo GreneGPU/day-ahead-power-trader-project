@@ -50,7 +50,7 @@ from intraday_power_quant.trading import (
 
 
 app = FastAPI(
-    title="Day-Ahead Power Trader API",
+    title="Day-Ahead Power Trading API",
     description="Vercel API for forecast-driven battery and prop-proxy strategy simulations.",
     version="0.1.0",
     docs_url="/api/docs",
@@ -211,7 +211,7 @@ def _split_complete_day_holdout(
 @app.get("/api")
 def api_root() -> dict[str, Any]:
     return {
-        "name": "Day-Ahead Power Trader API",
+        "name": "Day-Ahead Power Trading API",
         "status": "ready",
         "docs": "/api/docs",
         "health": "/api/health",
