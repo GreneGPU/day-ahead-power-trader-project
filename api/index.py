@@ -19,6 +19,11 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from intraday_power_quant.optimization import optimize_strategy_suite, simulate_strategy_from_settings
+from intraday_power_quant.prop_trading import (
+    PropConfig,
+    simulate_prop_perfect_foresight,
+    simulate_prop_positions,
+)
 from intraday_power_quant.risk import summarize_cashflow_risk
 from intraday_power_quant.trading import (
     BatteryConfig,
@@ -45,7 +50,7 @@ from intraday_power_quant.trading import (
 
 app = FastAPI(
     title="Day-Ahead Power Trader API",
-    description="Vercel API for forecast-driven battery strategy simulations.",
+    description="Vercel API for forecast-driven battery and prop-proxy strategy simulations.",
     version="0.1.0",
     docs_url="/api/docs",
     openapi_url="/api/openapi.json",
@@ -80,12 +85,29 @@ FORECAST_COLUMNS = {
     "Direct_15min_Prediction": "Direct 15-min ensemble",
 }
 
+PROP_STRATEGIES = {
+    "Forecast quantile",
+    "Weekly average band",
+    "Forecast edge",
+    "Volatility filtered average",
+    "Mean reversion",
+    "Momentum",
+    "Momentum spread",
+    "Channel breakout",
+    "Daily spread rank",
+    "Predicted best hours",
+    "Ensemble agreement",
+    "Wind signal",
+}
+
 
 class SimulationRequest(BaseModel):
     strategy: str = "Daily spread rank"
     records: list[dict[str, Any]] = Field(min_length=2, max_length=20_000)
     settings: dict[str, Any] | None = None
     battery: dict[str, Any] = Field(default_factory=dict)
+    trading_setup: str = "battery"
+    prop: dict[str, Any] = Field(default_factory=dict)
     time_col: str = "HourUTC"
     actual_col: str = "Actual_Price"
     forecast_col: str = "Prediction"
@@ -99,6 +121,8 @@ class StrategyComparisonRequest(BaseModel):
     optimize: bool = False
     test_days: int = Field(default=6, ge=2, le=30)
     battery: dict[str, Any] = Field(default_factory=dict)
+    trading_setup: str = "battery"
+    prop: dict[str, Any] = Field(default_factory=dict)
 
 
 def _json_records(frame: pd.DataFrame) -> list[dict[str, Any]]:
@@ -243,6 +267,15 @@ def compare_strategies(payload: StrategyComparisonRequest) -> dict[str, Any]:
         raise HTTPException(status_code=422, detail=f"Unknown forecast column: {payload.forecast_col}")
     if payload.strategy is not None and payload.strategy not in STRATEGY_DESCRIPTIONS:
         raise HTTPException(status_code=422, detail=f"Unknown strategy: {payload.strategy}")
+    trading_setup = payload.trading_setup.lower().replace("-", "_")
+    if trading_setup not in {"battery", "prop"}:
+        raise HTTPException(status_code=422, detail=f"Unknown trading setup: {payload.trading_setup}")
+    is_prop = trading_setup == "prop"
+    if is_prop and payload.strategy is not None and payload.strategy not in PROP_STRATEGIES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Strategy is battery-only and unavailable in prop mode: {payload.strategy}",
+        )
     forecasts, metrics, manifest = _load_deployment_results()
     history = _select_window(forecasts, payload.days)
     selected = history
@@ -250,12 +283,27 @@ def compare_strategies(payload: StrategyComparisonRequest) -> dict[str, Any]:
     optimization_meta: dict[str, dict[str, Any]] = {}
     try:
         battery = BatteryConfig(**payload.battery)
+        prop = PropConfig(**payload.prop)
         no_fee_battery = replace(
             battery,
             fee_per_mwh=0.0,
             charge_fee_per_mwh=0.0,
             discharge_fee_per_mwh=0.0,
         )
+        no_fee_prop = replace(prop, transaction_cost_dkk_per_mwh=0.0)
+
+        def prop_transform(
+            simulation: pd.DataFrame, _summary: dict[str, float]
+        ) -> tuple[pd.DataFrame, dict[str, float]]:
+            return simulate_prop_positions(simulation, prop)
+
+        def no_fee_prop_transform(
+            simulation: pd.DataFrame, _summary: dict[str, float]
+        ) -> tuple[pd.DataFrame, dict[str, float]]:
+            return simulate_prop_positions(simulation, no_fee_prop)
+
+        result_transform = prop_transform if is_prop else None
+        no_fee_result_transform = no_fee_prop_transform if is_prop else None
         if payload.optimize:
             train, selected = _split_complete_day_holdout(history, payload.test_days)
             optimized = optimize_strategy_suite(
@@ -263,19 +311,30 @@ def compare_strategies(payload: StrategyComparisonRequest) -> dict[str, Any]:
                 battery_config=battery,
                 ranking_metric="Cashflow",
                 forecast_col=payload.forecast_col,
+                result_transform=result_transform,
             )
             test_potential = optimize_strategy_suite(
                 selected,
                 battery_config=battery,
                 ranking_metric="Cashflow",
                 forecast_col=payload.forecast_col,
+                result_transform=result_transform,
             )
             no_fee_potential = optimize_strategy_suite(
                 selected,
-                battery_config=no_fee_battery,
+                battery_config=battery if is_prop else no_fee_battery,
                 ranking_metric="Cashflow",
                 forecast_col=payload.forecast_col,
+                result_transform=no_fee_result_transform,
             )
+            if is_prop:
+                optimized = optimized.loc[optimized["Strategy"].isin(PROP_STRATEGIES)].reset_index(drop=True)
+                test_potential = test_potential.loc[
+                    test_potential["Strategy"].isin(PROP_STRATEGIES)
+                ].reset_index(drop=True)
+                no_fee_potential = no_fee_potential.loc[
+                    no_fee_potential["Strategy"].isin(PROP_STRATEGIES)
+                ].reset_index(drop=True)
             test_potential_by_strategy = {
                 str(row["Strategy"]): row for row in test_potential.to_dict(orient="records")
             }
@@ -289,12 +348,17 @@ def compare_strategies(payload: StrategyComparisonRequest) -> dict[str, Any]:
                 settings_json = str(optimized_row["Settings_JSON"])
                 potential_row = test_potential_by_strategy[name]
                 no_fee_potential_row = no_fee_potential_by_strategy[name]
-                suite[name] = simulate_strategy_from_settings(
+                strategy_result = simulate_strategy_from_settings(
                     name,
                     selected,
                     settings_json,
                     battery_config=battery,
                     forecast_col=payload.forecast_col,
+                )
+                suite[name] = (
+                    result_transform(*strategy_result)
+                    if result_transform is not None
+                    else strategy_result
                 )
                 optimization_meta[name] = {
                     "Settings": str(optimized_row["Settings"]),
@@ -316,17 +380,34 @@ def compare_strategies(payload: StrategyComparisonRequest) -> dict[str, Any]:
                     "Evaluations": int(optimized_row["Evaluations"]),
                 }
         else:
-            suite = run_strategy_suite(
+            raw_suite = run_strategy_suite(
                 selected,
                 battery_config=battery,
                 forecast_col=payload.forecast_col,
             )
-            no_fee_suite = run_strategy_suite(
-                selected,
-                battery_config=no_fee_battery,
-                forecast_col=payload.forecast_col,
+            raw_no_fee_suite = (
+                raw_suite
+                if is_prop
+                else run_strategy_suite(
+                    selected,
+                    battery_config=no_fee_battery,
+                    forecast_col=payload.forecast_col,
+                )
             )
-            for name, settings in DEFAULT_SETTINGS.items():
+            suite = {
+                name: result_transform(*result) if result_transform is not None else result
+                for name, result in raw_suite.items()
+                if not is_prop or name in PROP_STRATEGIES
+            }
+            no_fee_suite = {
+                name: no_fee_result_transform(*result)
+                if no_fee_result_transform is not None
+                else result
+                for name, result in raw_no_fee_suite.items()
+                if not is_prop or name in PROP_STRATEGIES
+            }
+            for name in suite:
+                settings = DEFAULT_SETTINGS[name]
                 _, no_fee_summary = no_fee_suite[name]
                 optimization_meta[name] = {
                     "Settings": ", ".join(f"{key}={value}" for key, value in settings.items()),
@@ -355,6 +436,11 @@ def compare_strategies(payload: StrategyComparisonRequest) -> dict[str, Any]:
     for name, (simulation, summary) in suite.items():
         risk = summarize_cashflow_risk(simulation)
         description = STRATEGY_DESCRIPTIONS[name]
+        if is_prop:
+            description += (
+                " In the prop proxy, buy/charge signals map to long positions and "
+                "sell/discharge signals map to short positions for the next price move."
+            )
         if name == "Ensemble agreement" and int(summary.get("model_count", 0)) == 1:
             description += (
                 " This deployment contains one compatible ensemble-output series, so its agreement share "
@@ -378,6 +464,9 @@ def compare_strategies(payload: StrategyComparisonRequest) -> dict[str, Any]:
                 "Degradation_Cost": float(summary.get("total_degradation_cost", 0.0)),
                 "Round_Trip_Efficiency_Pct": float(summary["round_trip_efficiency"] * 100),
                 "Final_SOC_MWh": float(summary["final_soc_mwh"]),
+                "Return_Pct": float(summary.get("return_pct", float("nan"))),
+                "Ending_Equity_DKK": float(summary.get("ending_equity_dkk", float("nan"))),
+                "Position_Changes": int(summary.get("position_changes", summary["trades"])),
                 **optimization_meta[name],
             }
         )
@@ -390,16 +479,23 @@ def compare_strategies(payload: StrategyComparisonRequest) -> dict[str, Any]:
     best_simulation["Cumulative_Cashflow"] = best_simulation["Cashflow"].cumsum()
     selected_simulation = simulations[selected_name].copy()
     selected_simulation["Cumulative_Cashflow"] = selected_simulation["Cashflow"].cumsum()
-    oracle_simulation, oracle_summary = simulate_perfect_foresight_oracle(
-        selected,
-        battery_config=battery,
-        optimizer_config=RollingOptimizerConfig(
-            soc_steps=40,
-            terminal_soc_mwh=0.0,
-            market_timezone="Europe/Copenhagen",
-        ),
-        forecast_col=payload.forecast_col,
-    )
+    if is_prop:
+        oracle_simulation, oracle_summary = simulate_prop_perfect_foresight(
+            selected,
+            config=prop,
+            forecast_col=payload.forecast_col,
+        )
+    else:
+        oracle_simulation, oracle_summary = simulate_perfect_foresight_oracle(
+            selected,
+            battery_config=battery,
+            optimizer_config=RollingOptimizerConfig(
+                soc_steps=40,
+                terminal_soc_mwh=0.0,
+                market_timezone="Europe/Copenhagen",
+            ),
+            forecast_col=payload.forecast_col,
+        )
     oracle_risk = summarize_cashflow_risk(oracle_simulation)
     series_columns = [
         "HourUTC",
@@ -410,6 +506,16 @@ def compare_strategies(payload: StrategyComparisonRequest) -> dict[str, Any]:
         "State_Of_Charge_MWh",
         "Cashflow",
         "Cumulative_Cashflow",
+        "Position",
+        "Position_MWh",
+        "Price_Change_DKK",
+        "Gross_Cashflow",
+        "Transaction_Cost",
+        "Equity_DKK",
+    ]
+    best_series_columns = [column for column in series_columns if column in best_simulation.columns]
+    selected_series_columns = [
+        column for column in series_columns if column in selected_simulation.columns
     ]
     return _clean_json(
         {
@@ -440,9 +546,15 @@ def compare_strategies(payload: StrategyComparisonRequest) -> dict[str, Any]:
             },
             "forecast_col": payload.forecast_col,
             "forecast_model": FORECAST_COLUMNS[payload.forecast_col],
+            "trading_setup": trading_setup,
             "battery": asdict(battery),
+            "prop": asdict(prop),
             "perfect_foresight_benchmark": {
-                "label": "Perfect-foresight DP ceiling",
+                "label": (
+                    "Perfect-foresight directional ceiling"
+                    if is_prop
+                    else "Perfect-foresight DP ceiling"
+                ),
                 "Cashflow": float(oracle_summary["total_cashflow"]),
                 "Max_Drawdown": float(oracle_summary["max_drawdown"]),
                 "Daily_Sharpe": float(oracle_risk["daily_sharpe"]),
@@ -450,16 +562,21 @@ def compare_strategies(payload: StrategyComparisonRequest) -> dict[str, Any]:
                 "Fee_Cost": float(oracle_summary["total_fee_cost"]),
                 "Final_SOC_MWh": float(oracle_summary["final_soc_mwh"]),
                 "Description": (
-                    "Optimizes directly on realized test prices. This is a hindsight opportunity "
+                    "Selects the hindsight-optimal long/flat/short path directly from realized "
+                    "price changes, including switching costs. It is not tradable."
+                    if is_prop
+                    else "Optimizes directly on realized test prices. This is a hindsight opportunity "
                     "ceiling, not a tradable strategy or forecast result."
                 ),
             },
             "model_metrics": metrics,
             "strategies": comparison,
             "best_strategy": best_name,
-            "best_strategy_series": _json_records(best_simulation[series_columns]),
+            "best_strategy_series": _json_records(best_simulation[best_series_columns]),
             "selected_strategy": selected_name,
-            "selected_strategy_series": _json_records(selected_simulation[series_columns]),
+            "selected_strategy_series": _json_records(
+                selected_simulation[selected_series_columns]
+            ),
         }
     )
 
@@ -468,6 +585,14 @@ def compare_strategies(payload: StrategyComparisonRequest) -> dict[str, Any]:
 def simulate(payload: SimulationRequest) -> dict[str, Any]:
     if payload.strategy not in STRATEGY_DESCRIPTIONS:
         raise HTTPException(status_code=422, detail=f"Unknown strategy: {payload.strategy}")
+    trading_setup = payload.trading_setup.lower().replace("-", "_")
+    if trading_setup not in {"battery", "prop"}:
+        raise HTTPException(status_code=422, detail=f"Unknown trading setup: {payload.trading_setup}")
+    if trading_setup == "prop" and payload.strategy not in PROP_STRATEGIES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Strategy is battery-only and unavailable in prop mode: {payload.strategy}",
+        )
 
     frame = pd.DataFrame.from_records(payload.records)
     required = {payload.time_col, payload.actual_col, payload.forecast_col}
@@ -492,11 +617,19 @@ def simulate(payload: SimulationRequest) -> dict[str, Any]:
             actual_col=payload.actual_col,
             forecast_col=payload.forecast_col,
         )
+        if trading_setup == "prop":
+            intervals, summary = simulate_prop_positions(
+                intervals,
+                PropConfig(**payload.prop),
+                time_col=payload.time_col,
+                actual_col=payload.actual_col,
+            )
     except (KeyError, TypeError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     response: dict[str, Any] = {
         "strategy": payload.strategy,
+        "trading_setup": trading_setup,
         "settings": settings,
         "rows_processed": len(frame),
         "summary": summary,

@@ -106,8 +106,14 @@ def _add_result(
     strategy: str,
     settings: dict[str, object],
     simulator: Callable[[], tuple[pd.DataFrame, dict[str, float]]],
+    result_transform: Callable[
+        [pd.DataFrame, dict[str, float]], tuple[pd.DataFrame, dict[str, float]]
+    ]
+    | None = None,
 ) -> None:
     sim, summary = simulator()
+    if result_transform is not None:
+        sim, summary = result_transform(sim, summary)
     rows.append(_summary_row(strategy, settings, sim, summary))
 
 
@@ -291,16 +297,26 @@ def run_strategy_parameter_sweep(
     time_col: str = "HourUTC",
     actual_col: str = "Actual_Price",
     forecast_col: str = "Prediction",
+    result_transform: Callable[
+        [pd.DataFrame, dict[str, float]], tuple[pd.DataFrame, dict[str, float]]
+    ]
+    | None = None,
 ) -> pd.DataFrame:
     """Evaluate a compact grid of strategy parameters and return every successful run."""
     battery = battery_config or BatteryConfig()
     rows: list[dict[str, object]] = []
 
+    def add_result(
+        strategy: str,
+        settings: dict[str, object],
+        simulator: Callable[[], tuple[pd.DataFrame, dict[str, float]]],
+    ) -> None:
+        _add_result(rows, strategy, settings, simulator, result_transform)
+
     for low_quantile, high_quantile in QUANTILE_PAIRS:
         settings = {"low_quantile": low_quantile, "high_quantile": high_quantile}
         cfg = replace(battery, low_quantile=low_quantile, high_quantile=high_quantile)
-        _add_result(
-            rows,
+        add_result(
             "Forecast quantile",
             settings,
             lambda cfg=cfg: simulate_battery_arbitrage(df, cfg, time_col, actual_col, forecast_col),
@@ -308,8 +324,7 @@ def run_strategy_parameter_sweep(
 
     for settings in _iter_weekly_band_grid():
         cfg = WeeklyBandConfig(**settings)
-        _add_result(
-            rows,
+        add_result(
             "Weekly average band",
             settings,
             lambda cfg=cfg: simulate_weekly_average_band_arbitrage(df, battery, cfg, time_col, actual_col, forecast_col),
@@ -319,8 +334,7 @@ def run_strategy_parameter_sweep(
         for threshold in [0.0, 5.0, 10.0, 20.0, 30.0, 40.0]:
             settings = {"threshold": threshold, "reference_col": "Hourly_Baseline"}
             cfg = ForecastEdgeConfig(**settings)
-            _add_result(
-                rows,
+            add_result(
                 "Forecast edge",
                 settings,
                 lambda cfg=cfg: simulate_forecast_edge_arbitrage(df, battery, cfg, time_col, actual_col, forecast_col),
@@ -328,8 +342,7 @@ def run_strategy_parameter_sweep(
 
     for settings in _iter_volatility_grid():
         cfg = VolatilityFilterConfig(**settings)
-        _add_result(
-            rows,
+        add_result(
             "Volatility filtered average",
             settings,
             lambda cfg=cfg: simulate_volatility_filtered_average_arbitrage(
@@ -341,8 +354,7 @@ def run_strategy_parameter_sweep(
         for entry_z in [0.5, 1.0, 1.5, 2.0]:
             settings = {"window_days": window_days, "entry_z": entry_z, "min_history_days": 1.0}
             cfg = MeanReversionConfig(**settings)
-            _add_result(
-                rows,
+            add_result(
                 "Mean reversion",
                 settings,
                 lambda cfg=cfg: simulate_mean_reversion_arbitrage(df, battery, cfg, time_col, actual_col, forecast_col),
@@ -357,8 +369,7 @@ def run_strategy_parameter_sweep(
                     "smoothing_hours": smoothing_hours,
                 }
                 cfg = MomentumConfig(**settings)
-                _add_result(
-                    rows,
+                add_result(
                     "Momentum",
                     settings,
                     lambda cfg=cfg: simulate_momentum_arbitrage(df, battery, cfg, time_col, actual_col, forecast_col),
@@ -366,8 +377,7 @@ def run_strategy_parameter_sweep(
 
     for settings in _iter_daily_spread_grid():
         cfg = DailySpreadConfig(**settings)
-        _add_result(
-            rows,
+        add_result(
             "Daily spread rank",
             settings,
             lambda cfg=cfg: simulate_daily_spread_rank_arbitrage(df, battery, cfg, time_col, actual_col, forecast_col),
@@ -381,8 +391,7 @@ def run_strategy_parameter_sweep(
                 "market_timezone": "Europe/Copenhagen",
             }
             cfg = BestHoursConfig(**settings)
-            _add_result(
-                rows,
+            add_result(
                 "Predicted best hours",
                 settings,
                 lambda cfg=cfg: simulate_predicted_best_hours_arbitrage(
@@ -392,8 +401,7 @@ def run_strategy_parameter_sweep(
 
     for settings in _iter_ensemble_grid():
         cfg = EnsembleAgreementConfig(**settings)
-        _add_result(
-            rows,
+        add_result(
             "Ensemble agreement",
             settings,
             lambda cfg=cfg: simulate_ensemble_agreement_arbitrage(df, battery, cfg, time_col, actual_col, forecast_col),
@@ -401,8 +409,7 @@ def run_strategy_parameter_sweep(
 
     for settings in _iter_momentum_spread_grid():
         cfg = MomentumSpreadConfig(**settings)
-        _add_result(
-            rows,
+        add_result(
             "Momentum spread",
             settings,
             lambda cfg=cfg: simulate_momentum_spread_arbitrage(df, battery, cfg, time_col, actual_col, forecast_col),
@@ -412,8 +419,7 @@ def run_strategy_parameter_sweep(
         for buffer in [0.0, 5.0, 10.0, 20.0]:
             settings = {"window_days": window_days, "buffer": buffer, "min_history_days": 1.0}
             cfg = ChannelBreakoutConfig(**settings)
-            _add_result(
-                rows,
+            add_result(
                 "Channel breakout",
                 settings,
                 lambda cfg=cfg: simulate_channel_breakout_arbitrage(df, battery, cfg, time_col, actual_col, forecast_col),
@@ -425,8 +431,7 @@ def run_strategy_parameter_sweep(
         "market_timezone": "Europe/Copenhagen",
     }
     rolling_cfg = RollingOptimizerConfig(**rolling_settings)
-    _add_result(
-        rows,
+    add_result(
         "Rolling price optimizer",
         rolling_settings,
         lambda: simulate_rolling_price_optimizer(
@@ -444,8 +449,7 @@ def run_strategy_parameter_sweep(
                 "market_timezone": "Europe/Copenhagen",
             }
             cfg = UncertaintyOptimizerConfig(**settings)
-            _add_result(
-                rows,
+            add_result(
                 "Uncertainty-aware optimizer",
                 settings,
                 lambda cfg=cfg: simulate_uncertainty_aware_optimizer(
@@ -461,8 +465,7 @@ def run_strategy_parameter_sweep(
             "market_timezone": "Europe/Copenhagen",
         }
         cfg = DegradationOptimizerConfig(**settings)
-        _add_result(
-            rows,
+        add_result(
             "Degradation-aware optimizer",
             settings,
             lambda cfg=cfg: simulate_degradation_aware_optimizer(
@@ -484,8 +487,7 @@ def run_strategy_parameter_sweep(
                     "market_timezone": "Europe/Copenhagen",
                 }
                 cfg = WindSignalConfig(**settings)
-                _add_result(
-                    rows,
+                add_result(
                     "Wind signal",
                     settings,
                     lambda cfg=cfg: simulate_wind_signal_arbitrage(
@@ -499,8 +501,7 @@ def run_strategy_parameter_sweep(
                     "terminal_soc_mwh": 0.0,
                 }
                 confirmed_cfg = WindConfirmedOptimizerConfig(**confirmed_settings)
-                _add_result(
-                    rows,
+                add_result(
                     "Wind-confirmed optimizer",
                     confirmed_settings,
                     lambda cfg=confirmed_cfg: simulate_wind_confirmed_optimizer(
@@ -518,6 +519,10 @@ def optimize_strategy_suite(
     time_col: str = "HourUTC",
     actual_col: str = "Actual_Price",
     forecast_col: str = "Prediction",
+    result_transform: Callable[
+        [pd.DataFrame, dict[str, float]], tuple[pd.DataFrame, dict[str, float]]
+    ]
+    | None = None,
 ) -> pd.DataFrame:
     """Return the best cashflow setting for each strategy in the sweep."""
     return best_parameter_rows(
@@ -527,6 +532,7 @@ def optimize_strategy_suite(
             time_col=time_col,
             actual_col=actual_col,
             forecast_col=forecast_col,
+            result_transform=result_transform,
         ),
         ranking_metric=ranking_metric,
     )

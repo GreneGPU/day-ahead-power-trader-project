@@ -9,6 +9,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from intraday_power_quant.evaluation import calculate_metrics
 from intraday_power_quant.optimization import optimize_strategy_suite, run_strategy_parameter_sweep
+from intraday_power_quant.prop_trading import PropConfig, simulate_prop_positions
 from intraday_power_quant.research import (
     daily_spread_robustness_grid,
     execution_cost_stress_table,
@@ -73,6 +74,33 @@ def test_battery_simulation_returns_one_row_per_interval():
 
 def test_battery_defaults_to_empty_initial_state_of_charge():
     assert BatteryConfig().initial_soc_mwh == 0
+
+
+def test_prop_proxy_maps_signals_to_positions_and_charges_switching_costs():
+    signals = pd.DataFrame(
+        {
+            "HourUTC": pd.date_range("2026-01-01", periods=4, freq="1h", tz="UTC"),
+            "Actual_Price": [10.0, 20.0, 15.0, 30.0],
+            "Forecast_Price": [12.0, 18.0, 16.0, 28.0],
+            "Signal_Action": ["charge", "discharge", "charge", "hold"],
+        }
+    )
+    simulation, summary = simulate_prop_positions(
+        signals,
+        PropConfig(
+            initial_capital_dkk=1_000.0,
+            position_size_mwh=2.0,
+            transaction_cost_dkk_per_mwh=1.0,
+        ),
+    )
+
+    assert simulation["Action"].tolist() == ["long", "short", "long", "exit"]
+    assert simulation["Position"].tolist() == [1, -1, 1, 0]
+    assert math.isclose(summary["gross_cashflow"], 60.0)
+    assert math.isclose(summary["total_fee_cost"], 12.0)
+    assert math.isclose(summary["total_cashflow"], 48.0)
+    assert math.isclose(summary["return_pct"], 4.8)
+    assert simulation["Position"].iloc[-1] == 0
 
 
 def test_battery_simulation_applies_round_trip_efficiency_and_directional_fees():

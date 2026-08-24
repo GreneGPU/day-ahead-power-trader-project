@@ -350,6 +350,7 @@ def _simulate_battery_dispatch(
         rows.append(
             {
                 **row_dict,
+                "Signal_Action": requested_action,
                 "Action": action,
                 "Dispatch_MW": dispatch_mw,
                 "State_Of_Charge_MWh": soc,

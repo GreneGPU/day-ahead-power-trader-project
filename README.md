@@ -1,10 +1,12 @@
 # Day-Ahead Power Trader Project
 
-Transfer-learning 15-minute day-ahead electricity-price forecasting and flexibility simulation for DK1/DK2-style power trader research.
+Transfer-learning 15-minute day-ahead electricity-price forecasting, physical battery optimization, and synthetic proprietary-trading research for DK1/DK2-style power markets.
 
 Live dashboard: https://greneportfolio.vercel.app/
 
-The live dashboard defaults to 90% round-trip battery efficiency and a 2026 DK1 distribution-connected fee assumption: 115.41 DKK/MWh while charging and 10.71 DKK/MWh while discharging. These editable amounts combine Energinet's variable tariffs with Nord Pool's standard day-ahead trading and clearing fee; local DSO tariffs, taxes, VAT, fixed/capacity charges, imbalance costs, and currency service are excluded.
+The live dashboard offers two accounting setups. `Physical battery` defaults to 90% round-trip efficiency and a 2026 DK1 distribution-connected fee assumption: 115.41 DKK/MWh while charging and 10.71 DKK/MWh while discharging. `Prop proxy` maps buy/charge signals to long positions and sell/discharge signals to short positions for the next observed DK1 price move, with editable capital, position size, switching cost, and daily loss limit.
+
+The prop setup is deliberately labeled as a synthetic research proxy. The thesis dataset does not contain historical financial-contract entry quotes, bid/ask spreads, margin, collateral, liquidity, or imbalance settlement, so its PnL is not presented as executable Nord Pool spot arbitrage.
 
 Its default evaluation mode reserves the final six complete DK1 calendar days as a chronological holdout: every strategy searches its parameter grid for the highest net cashflow on all earlier available observations, then the dashboard ranks strategies, calculates daily Sharpe, and shows trade logs using only those six unseen days. A fixed-default mode remains available for comparison.
 
@@ -18,6 +20,8 @@ This repo turns the thesis notebook into a maintainable project:
 - configurable chronological validation split: fixed ratio or final N days
 - model-ranking metrics, coverage checks, leakage warnings, and ablation entry point
 - forecast-driven battery arbitrage simulator
+- asset-free long/short research proxy with capital return, transaction costs, loss limits, and forced flat close
+- separate perfect-foresight benchmarks for battery dispatch and synthetic directional positions
 - selectable strategy suite with user-adjustable parameters
 - live strategy selection with per-interval charge/discharge logs and CSV export
 - DK1 actual-versus-prediction chart with charge and discharge execution markers
@@ -52,6 +56,7 @@ intraday-power-quant/
 |   |-- models.py
 |   |-- optimization.py
 |   |-- plots.py
+|   |-- prop_trading.py
 |   |-- research.py
 |   |-- risk.py
 |   |-- trading.py
@@ -164,8 +169,10 @@ The Streamlit dashboard supports multiple dispatch strategies and day-ahead rese
 - `Wind signal`: uses only Energinet DK1 day-ahead wind level and ramp signals to choose actions.
 - `Wind-confirmed optimizer`: permits predicted-price optimizer actions only when day-ahead wind conditions confirm them.
 
-The deployed comparison also reports a perfect-foresight dynamic-program benchmark based on actual
-test prices. It is labeled as a hindsight opportunity ceiling and is not ranked as a tradable strategy.
+The deployed comparison reports setup-specific perfect-foresight benchmarks based on actual test prices:
+the battery view optimizes the realized dispatch path, while the prop view optimizes the realized
+long/flat/short path including switching costs. Both are labeled as hindsight opportunity ceilings and
+are not ranked as tradable strategies.
 For each strategy, the site also calculates a no-fee potential counterfactual by setting all modeled
 trading fees to zero while retaining battery efficiency and degradation costs. In optimized mode,
 both fee-adjusted and no-fee potential are re-optimized on the test period and labeled as hindsight-only.

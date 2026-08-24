@@ -148,6 +148,49 @@ def test_strategy_comparison_rejects_unknown_strategy() -> None:
     assert response.status_code == 422
 
 
+def test_prop_comparison_returns_directional_accounting() -> None:
+    response = client.post(
+        "/api/compare",
+        json={
+            "forecast_col": "Prediction",
+            "strategy": "Daily spread rank",
+            "days": 7,
+            "trading_setup": "prop",
+            "prop": {
+                "initial_capital_dkk": 100_000,
+                "position_size_mwh": 10,
+                "transaction_cost_dkk_per_mwh": 0.41,
+                "max_daily_loss_dkk": 5_000,
+            },
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["trading_setup"] == "prop"
+    assert len(payload["strategies"]) == 12
+    selected = next(
+        row for row in payload["strategies"] if row["Strategy"] == "Daily spread rank"
+    )
+    assert selected["Return_Pct"] is not None
+    assert selected["Degradation_Cost"] == 0
+    assert payload["selected_strategy_series"][-1]["Position"] == 0
+    assert any(
+        row["Action"] in {"long", "short"} for row in payload["selected_strategy_series"]
+    )
+    assert payload["perfect_foresight_benchmark"]["label"] == (
+        "Perfect-foresight directional ceiling"
+    )
+
+
+def test_prop_comparison_rejects_battery_only_optimizer() -> None:
+    response = client.post(
+        "/api/compare",
+        json={"trading_setup": "prop", "strategy": "Rolling price optimizer"},
+    )
+    assert response.status_code == 422
+    assert "battery-only" in response.json()["detail"]
+
+
 def test_strategy_optimization_uses_earlier_train_and_later_unseen_test_data() -> None:
     response = client.post(
         "/api/compare",

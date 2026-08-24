@@ -20,8 +20,13 @@
     .lede { margin:0; max-width:720px; color:var(--muted); font-size:16px; }
     .api-link { flex:0 0 auto; color:var(--text); text-decoration:none; border:1px solid var(--line); border-radius:10px; padding:10px 14px; background:rgba(14,30,49,.7); }
     .controls { display:grid; grid-template-columns:1.5fr 1.5fr 1fr repeat(3,.75fr); gap:12px; align-items:end; padding:18px; border:1px solid var(--line); border-radius:16px; background:rgba(11,27,45,.86); box-shadow:var(--shadow); }
-    .fee-control { grid-column:span 2; }
+    [hidden] { display:none!important; }
+    .fee-control,.setup-control { grid-column:span 2; }
     .controls button { grid-column:span 1; }
+    .segmented { display:grid; grid-template-columns:1fr 1fr; margin-top:6px; padding:3px; border:1px solid var(--line); border-radius:9px; background:#071421; }
+    .segmented button { min-height:34px; padding:0 12px; border-radius:6px; color:var(--muted); background:transparent; }
+    .controls .segmented button { grid-column:auto; }
+    .segmented button.active { color:#06101d; background:var(--green); }
     label { display:block; color:var(--muted); font-size:11px; font-weight:750; letter-spacing:.05em; text-transform:uppercase; }
     select,input { width:100%; margin-top:6px; padding:10px 11px; border:1px solid var(--line); border-radius:9px; color:var(--text); background:#071421; font:inherit; outline:none; }
     select:focus,input:focus { border-color:var(--blue); }
@@ -45,7 +50,7 @@
     @keyframes spin { to { transform:rotate(360deg); } }
     .metrics { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin:22px 0 14px; }
     .metric,.card { border:1px solid var(--line); border-radius:15px; background:linear-gradient(145deg,rgba(16,34,56,.94),rgba(8,22,38,.94)); box-shadow:var(--shadow); }
-    .metric { display:flex; flex-direction:column; padding:18px; min-height:110px; }
+    .metric { display:flex; flex-direction:column; min-width:0; padding:18px; min-height:110px; }
     .metric span { color:var(--muted); font-size:12px; }
     .metric strong { display:block; margin:7px 0 2px; font-size:clamp(21px,2.5vw,31px); letter-spacing:-.035em; color:var(--green); }
     .metric small { display:block; overflow:hidden; margin-top:auto; color:var(--muted); text-overflow:ellipsis; white-space:nowrap; }
@@ -91,6 +96,9 @@
     .action-badge { display:inline-flex; min-width:76px; justify-content:center; padding:3px 8px; border-radius:20px; font-size:11px; font-weight:800; text-transform:uppercase; }
     .action-badge.charge { color:var(--blue); background:rgba(97,173,255,.12); }
     .action-badge.discharge { color:var(--green); background:rgba(63,224,157,.12); }
+    .action-badge.long { color:var(--green); background:rgba(63,224,157,.12); }
+    .action-badge.short { color:var(--red); background:rgba(255,107,122,.12); }
+    .action-badge.exit,.action-badge.risk-off { color:var(--orange); background:rgba(255,181,95,.12); }
     .strategy-guide { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); align-items:stretch; gap:12px; }
     .guide-item { display:grid; grid-template-rows:auto minmax(64px,1fr) auto auto; min-height:218px; padding:16px; border:1px solid var(--line); border-radius:12px; background:rgba(5,17,30,.48); }
     .guide-heading { display:flex; align-items:center; gap:10px; margin-bottom:7px; }
@@ -104,7 +112,7 @@
     .settings-box span { display:block; margin-bottom:5px; color:var(--muted); font-size:11px; text-transform:uppercase; }
     .settings-box code { color:var(--text); white-space:normal; word-break:break-word; }
     footer { margin-top:20px; color:var(--muted); font-size:12px; }
-    @media (max-width:980px) { .controls{grid-template-columns:repeat(3,1fr)} .fee-control,.controls button{grid-column:span 1}.grid{grid-template-columns:1fr}.metrics{grid-template-columns:repeat(2,1fr)}.cashflow-card,.strategy-details-card{grid-column:1;grid-row:auto;align-self:stretch}.detail-metrics{grid-template-columns:repeat(2,minmax(0,1fr))} }
+    @media (max-width:980px) { .controls{grid-template-columns:repeat(3,1fr)} .fee-control,.setup-control,.controls button{grid-column:span 1}.grid{grid-template-columns:1fr}.metrics{grid-template-columns:repeat(2,1fr)}.cashflow-card,.strategy-details-card{grid-column:1;grid-row:auto;align-self:stretch}.detail-metrics{grid-template-columns:repeat(2,minmax(0,1fr))} }
     @media (max-width:700px) { .strategy-guide{grid-template-columns:1fr} }
     @media (max-width:620px) { main{padding:34px 0}header{align-items:flex-start;flex-direction:column}.controls{grid-template-columns:1fr 1fr}.controls>div:first-child,.controls button{grid-column:1/-1}.calculation-state{grid-template-columns:auto 1fr}.calculation-elapsed{grid-column:2}.metrics{grid-template-columns:1fr 1fr}.metric{min-height:95px;padding:14px}.card{padding:15px}.rank-row{grid-template-columns:20px 1fr auto}.bar-track{display:none} }
   </style>
@@ -115,24 +123,30 @@
     <div>
       <div class="eyebrow">Jakob Grene · quantitative energy trading research</div>
       <h1>Day-Ahead Power Trader</h1>
-      <p class="lede">Compare forecast-driven battery strategies across the saved 15-minute test predictions. Training stays offline; results include battery losses and editable DK1 market and grid fees.</p>
+      <p class="lede" id="pageLede">Compare forecast-driven battery strategies across the saved 15-minute test predictions. Training stays offline; results include battery losses and editable DK1 market and grid fees.</p>
     </div>
     <a class="api-link" href="/api/docs">API docs</a>
   </header>
 
   <section class="controls" aria-label="Analysis controls">
+    <div class="setup-control"><label>Trading setup</label><div class="segmented" role="group" aria-label="Trading setup"><button type="button" class="active" data-trading-setup="battery" aria-pressed="true">Physical battery</button><button type="button" data-trading-setup="prop" aria-pressed="false">Prop proxy</button></div></div>
     <div><label for="forecast">Prediction series</label><select id="forecast"><option value="Prediction">Transfer residual ensemble</option><option value="Hourly_Baseline">Hourly baseline</option><option value="Direct_15min_Prediction">Direct 15-minute ensemble</option></select></div>
     <div><label for="strategy">Strategy to inspect</label><select id="strategy" disabled><option value="">Loading strategies…</option></select></div>
     <div><label for="mode">Evaluation mode</label><select id="mode"><option value="optimized">Tune earlier → test 6 full days</option><option value="fixed">Fixed defaults</option></select></div>
     <div><label for="window">History used</label><select id="window"><option value="">Full saved period</option><option value="14">Last 14 days</option><option value="7">Last 7 days</option></select></div>
-    <div><label for="capacity">Capacity MWh</label><input id="capacity" type="number" min="1" step="10" value="100"></div>
-    <div><label for="power">Power MW</label><input id="power" type="number" min="1" step="5" value="25"></div>
-    <div><label for="roundTrip">Round-trip efficiency %</label><input id="roundTrip" type="number" min="1" max="100" step="1" value="90"></div>
-    <div class="fee-control"><label for="chargeFee">Charge fees DKK/MWh</label><input id="chargeFee" type="number" min="0" step="0.01" value="115.41"></div>
-    <div class="fee-control"><label for="dischargeFee">Discharge fees DKK/MWh</label><input id="dischargeFee" type="number" min="0" step="0.01" value="10.71"></div>
+    <div data-setup-control="battery"><label for="capacity">Capacity MWh</label><input id="capacity" type="number" min="1" step="10" value="100"></div>
+    <div data-setup-control="battery"><label for="power">Power MW</label><input id="power" type="number" min="1" step="5" value="25"></div>
+    <div data-setup-control="battery"><label for="roundTrip">Round-trip efficiency %</label><input id="roundTrip" type="number" min="1" max="100" step="1" value="90"></div>
+    <div class="fee-control" data-setup-control="battery"><label for="chargeFee">Charge fees DKK/MWh</label><input id="chargeFee" type="number" min="0" step="0.01" value="115.41"></div>
+    <div class="fee-control" data-setup-control="battery"><label for="dischargeFee">Discharge fees DKK/MWh</label><input id="dischargeFee" type="number" min="0" step="0.01" value="10.71"></div>
+    <div data-setup-control="prop" hidden><label for="startingCapital">Starting capital DKK</label><input id="startingCapital" type="number" min="1000" step="10000" value="100000"></div>
+    <div data-setup-control="prop" hidden><label for="positionSize">Position size MWh</label><input id="positionSize" type="number" min="0.1" step="1" value="10"></div>
+    <div data-setup-control="prop" hidden><label for="transactionCost">Trading cost DKK/MWh</label><input id="transactionCost" type="number" min="0" step="0.01" value="0.41"></div>
+    <div class="fee-control" data-setup-control="prop" hidden><label for="dailyLossLimit">Daily loss limit DKK</label><input id="dailyLossLimit" type="number" min="0" step="500" value="5000"></div>
     <button id="run">Compare strategies</button>
   </section>
-  <div class="cost-note"><strong>DK1 2026 distribution-connected assumption:</strong> charge fee = Energinet system 72 + network 43 + Nord Pool 0.41; discharge fee = Energinet feed-in 5 + production balance 5.30 + Nord Pool 0.41 DKK/MWh. Excludes local DSO tariffs, electricity tax, VAT, fixed/capacity charges, imbalance costs, and Nord Pool currency service. The no-fee potential reruns each strategy with all three modeled trading fees set to zero; efficiency and degradation still apply. Sources: <a href="https://energinet.dk/media/ikylsqle/energinets_tarifkatalog_2026.pdf" target="_blank" rel="noreferrer">Energinet</a> and <a href="https://www.nordpoolgroup.com/4a7ad8/globalassets/trading-and-services/nord-pool-fee-schedule-2026-nordic-and-baltic-market.pdf" target="_blank" rel="noreferrer">Nord Pool</a>.</div>
+  <div class="cost-note" id="batteryNote"><strong>DK1 2026 distribution-connected assumption:</strong> charge fee = Energinet system 72 + network 43 + Nord Pool 0.41; discharge fee = Energinet feed-in 5 + production balance 5.30 + Nord Pool 0.41 DKK/MWh. Excludes local DSO tariffs, electricity tax, VAT, fixed/capacity charges, imbalance costs, and Nord Pool currency service. The no-fee potential reruns each strategy with all three modeled trading fees set to zero; efficiency and degradation still apply. Sources: <a href="https://energinet.dk/media/ikylsqle/energinets_tarifkatalog_2026.pdf" target="_blank" rel="noreferrer">Energinet</a> and <a href="https://www.nordpoolgroup.com/4a7ad8/globalassets/trading-and-services/nord-pool-fee-schedule-2026-nordic-and-baltic-market.pdf" target="_blank" rel="noreferrer">Nord Pool</a>.</div>
+  <div class="cost-note" id="propNote" hidden><strong>Synthetic directional research proxy:</strong> low-price signals become long and high-price signals become short for the next observed DK1 price change. Position changes incur the selected cost and the final position is closed. This is not executable Nord Pool spot arbitrage: no historical financial-contract quotes, bid/ask spread, margin, collateral, liquidity or imbalance settlement are available in the thesis dataset.</div>
   <div class="calculation-state" id="calculationState" role="status" aria-live="polite">
     <span class="calculation-spinner" aria-hidden="true"></span>
     <div><strong id="statusText">Loading saved predictions…</strong><small id="statusDetail">Preparing strategy calculations.</small></div>
@@ -149,11 +163,11 @@
 
   <section class="grid">
     <article class="card">
-      <div class="card-head"><div><h2>DK1 actual price vs prediction</h2><p id="priceSubtitle">Saved 15-minute test forecast</p></div><div class="legend"><span class="actual">Actual</span><span class="forecast">Prediction</span><span class="charge">Charge</span><span class="discharge">Discharge</span></div></div>
+      <div class="card-head"><div><h2>DK1 actual price vs prediction</h2><p id="priceSubtitle">Saved 15-minute test forecast</p></div><div class="legend"><span class="actual">Actual</span><span class="forecast">Prediction</span><span class="charge" id="buyLegend">Charge</span><span class="discharge" id="sellLegend">Discharge</span></div></div>
       <canvas id="priceChart"></canvas>
     </article>
     <article class="card">
-      <div class="card-head"><div><h2>Strategy cashflow ranking</h2><p>Same forecast, battery, and realized prices</p></div></div>
+      <div class="card-head"><div><h2>Strategy cashflow ranking</h2><p id="rankingSubtitle">Same forecast, battery, and realized prices</p></div></div>
       <div class="ranking" id="ranking"></div>
     </article>
     <article class="card cashflow-card">
@@ -165,32 +179,32 @@
       <div class="metrics detail-metrics">
         <div class="metric"><span>Optimized training PnL</span><strong id="trainCashflow">—</strong><small>Best setting on earlier data</small></div>
         <div class="metric"><span>Best test-grid PnL</span><strong id="testPotentialCashflow">—</strong><small>Best tested setting; may still lose</small></div>
-        <div class="metric"><span>Potential without fees</span><strong id="noFeePotentialCashflow">—</strong><small>Hindsight; modeled fees set to 0</small></div>
-        <div class="metric"><span>Perfect-foresight ceiling</span><strong id="oracleCashflow">—</strong><small>Actual-price DP benchmark</small></div>
-        <div class="metric"><span>Active intervals</span><strong id="activeIntervals">—</strong><small>Charge + discharge</small></div>
+        <div class="metric"><span id="noCostPotentialLabel">Potential without fees</span><strong id="noFeePotentialCashflow">—</strong><small id="noCostPotentialNote">Hindsight; modeled fees set to 0</small></div>
+        <div class="metric"><span>Perfect-foresight ceiling</span><strong id="oracleCashflow">—</strong><small id="oracleNote">Actual-price DP benchmark</small></div>
+        <div class="metric"><span>Active intervals</span><strong id="activeIntervals">—</strong><small id="activeIntervalsNote">Charge + discharge</small></div>
         <div class="metric"><span>Risk-adjusted score</span><strong id="riskScore">—</strong><small>Cashflow − drawdown</small></div>
         <div class="metric"><span>6-day daily Sharpe</span><strong id="dailySharpe">—</strong><small id="sharpeNote">Annualized cashflow stability proxy</small></div>
-        <div class="metric"><span>Final state of charge</span><strong id="finalSoc">—</strong><small>MWh</small></div>
-        <div class="metric"><span>Round-trip efficiency</span><strong id="efficiencyUsed">—</strong><small>Charge × discharge efficiency</small></div>
-        <div class="metric"><span>Modeled fees</span><strong id="modeledFees">—</strong><small>Included in net cashflow</small></div>
+        <div class="metric"><span id="capitalMetricLabel">Final state of charge</span><strong id="capitalMetricValue">—</strong><small id="capitalMetricNote">MWh</small></div>
+        <div class="metric"><span id="setupMetricLabel">Round-trip efficiency</span><strong id="setupMetricValue">—</strong><small id="setupMetricNote">Charge × discharge efficiency</small></div>
+        <div class="metric"><span id="costMetricLabel">Modeled fees</span><strong id="modeledFees">—</strong><small id="costMetricNote">Included in net cashflow</small></div>
       </div>
       <div class="settings-box"><span>Training-optimized parameters used for the out-of-sample test</span><code id="strategySettings">Loading…</code></div>
       <div class="settings-box"><span>Best test-grid parameters (hindsight only)</span><code id="testPotentialSettings">Loading…</code></div>
-      <div class="settings-box"><span>No-fee potential parameters (hindsight only)</span><code id="noFeePotentialSettings">Loading…</code></div>
+      <div class="settings-box"><span id="noCostSettingsLabel">No-fee potential parameters (hindsight only)</span><code id="noFeePotentialSettings">Loading…</code></div>
     </article>
 
     <article class="card wide">
       <div class="card-head"><div><h2>Strategy comparison</h2><p>OOS test uses training-selected parameters. Best test-grid PnL re-runs each strategy's parameter grid on the test period. It may be negative when every tested setting loses; it is hindsight-only, not investable.</p></div></div>
-      <div class="table-wrap"><table><thead><tr><th>#</th><th>Strategy</th><th class="num">OOS test PnL</th><th class="num">Optimized train PnL</th><th class="num">Best test-grid PnL</th><th class="num">Potential uplift</th><th class="num">No-fee potential</th><th class="num">Fees</th><th class="num">Degradation</th><th class="num">Max drawdown</th><th class="num">Risk score</th><th class="num">6-day Sharpe</th><th class="num">Trades</th><th class="num">Charge</th><th class="num">Discharge</th></tr></thead><tbody id="strategyRows"></tbody></table></div>
+      <div class="table-wrap"><table><thead><tr><th>#</th><th>Strategy</th><th class="num">OOS test PnL</th><th class="num">Optimized train PnL</th><th class="num">Best test-grid PnL</th><th class="num">Potential uplift</th><th class="num" id="noCostTableHeader">No-fee potential</th><th class="num">Costs</th><th class="num" id="secondaryMetricHeader">Degradation</th><th class="num">Max drawdown</th><th class="num">Risk score</th><th class="num">6-day Sharpe</th><th class="num">Active</th><th class="num" id="buyActionHeader">Charge</th><th class="num" id="sellActionHeader">Discharge</th></tr></thead><tbody id="strategyRows"></tbody></table></div>
     </article>
 
     <article class="card wide">
-      <div class="card-head"><div><h2>Charge and discharge log</h2><p id="tradeSubtitle">Select a strategy to inspect every executed battery action.</p></div><div class="log-actions"><span id="tradeCount">0 actions</span><button type="button" class="secondary-button" id="downloadLog">Download CSV</button></div></div>
-      <div class="table-wrap log-wrap"><table><thead><tr><th>Time</th><th>Action</th><th class="num">Actual price</th><th class="num">Forecast</th><th class="num">Dispatch MW</th><th class="num">State of charge</th><th class="num">Interval cashflow</th><th class="num">Cumulative cashflow</th></tr></thead><tbody id="tradeRows"></tbody></table></div>
+      <div class="card-head"><div><h2 id="tradeLogTitle">Charge and discharge log</h2><p id="tradeSubtitle">Select a strategy to inspect every executed battery action.</p></div><div class="log-actions"><span id="tradeCount">0 actions</span><button type="button" class="secondary-button" id="downloadLog">Download CSV</button></div></div>
+      <div class="table-wrap log-wrap"><table><thead><tr><th>Time</th><th>Action</th><th class="num">Actual price</th><th class="num">Forecast</th><th class="num" id="exposureHeader">Dispatch MW</th><th class="num" id="stateHeader">State of charge</th><th class="num">Interval cashflow</th><th class="num">Cumulative cashflow</th></tr></thead><tbody id="tradeRows"></tbody></table></div>
     </article>
 
     <article class="card wide">
-      <div class="card-head"><div><h2>How each strategy works</h2><p>Charging means buying and storing electricity; discharging means selling it. Predictions choose the action, while realized prices determine the displayed cashflow.</p></div></div>
+      <div class="card-head"><div><h2>How each strategy works</h2><p id="strategyGuideIntro">Charging means buying and storing electricity; discharging means selling it. Predictions choose the action, while realized prices determine the displayed cashflow.</p></div></div>
       <div class="strategy-guide" id="strategyGuide"></div>
     </article>
 
@@ -204,7 +218,7 @@
 
 <script>
 const $ = selector => document.querySelector(selector);
-const state = { results:null, comparison:null };
+const state = { results:null, comparison:null, tradingSetup:'battery' };
 const dkk = new Intl.NumberFormat('en-DK',{maximumFractionDigits:0});
 const colors = { actual:'#61adff', forecast:'#3fe09d', charge:'#ffb55f', discharge:'#e879f9', grid:'#213955', muted:'#8ea5bf', green:'#3fe09d', red:'#ff6b7a' };
 const modelNames = { Prediction:'Transfer residual ensemble', Hourly_Baseline:'Hourly baseline only', Direct_15min_Prediction:'Direct 15-min ensemble' };
@@ -212,7 +226,10 @@ let calculationTimer=null;
 
 function fmt(value,digits=2){ return value==null || !Number.isFinite(Number(value)) ? '—' : Number(value).toLocaleString('en-DK',{maximumFractionDigits:digits}); }
 function cash(value){ return value==null ? '—' : `${dkk.format(value)} DKK`; }
+function pct(value){ return value==null || !Number.isFinite(Number(value)) ? '—' : `${fmt(value,2)}%`; }
 function selectedDays(){ const value=$('#window').value; return value ? Number(value) : null; }
+function isProp(){ return state.tradingSetup==='prop'; }
+function actionNames(){ return isProp()?{buy:'long',sell:'short',buyLabel:'Long',sellLabel:'Short'}:{buy:'charge',sell:'discharge',buyLabel:'Charge',sellLabel:'Discharge'}; }
 function setStatus(text,kind='loading',detail=''){
   $('#statusText').textContent=text; $('#statusDetail').textContent=detail;
   $('#calculationState').className=`calculation-state ${kind==='ok'?'ok':kind==='bad'?'bad':''}`;
@@ -228,7 +245,8 @@ function setCalculating(active,optimize=false){
     const updateElapsed=()=>{elapsed.textContent=`${Math.floor((Date.now()-started)/1000)}s elapsed`};
     updateElapsed(); calculationTimer=setInterval(updateElapsed,1000);
     $('#run').textContent='Calculating…';
-    setStatus('Calculating strategy results…','loading',optimize?'Searching training grids, testing unseen days, and calculating fee-adjusted and zero-fee potential across 16 strategies.':'Running 16 fixed strategies with fee-adjusted and zero-fee counterfactuals.');
+    const count=isProp()?12:16; const costLabel=isProp()?'cost-adjusted and zero-cost':'fee-adjusted and zero-fee';
+    setStatus('Calculating strategy results…','loading',optimize?`Searching training grids, testing unseen days, and calculating ${costLabel} potential across ${count} strategies.`:`Running ${count} fixed strategies with ${costLabel} counterfactuals.`);
   }else{
     $('#run').textContent='Compare strategies';
     $('#calculationElapsed').textContent='Complete';
@@ -236,6 +254,21 @@ function setCalculating(active,optimize=false){
   }
 }
 function metricForForecast(metrics,forecast){ return metrics.find(row=>row.Model===modelNames[forecast]); }
+
+function updateSetupUI(){
+  document.querySelectorAll('[data-trading-setup]').forEach(button=>{const active=button.dataset.tradingSetup===state.tradingSetup;button.classList.toggle('active',active);button.setAttribute('aria-pressed',String(active))});
+  document.querySelectorAll('[data-setup-control]').forEach(control=>{control.hidden=control.dataset.setupControl!==state.tradingSetup});
+  $('#batteryNote').hidden=isProp(); $('#propNote').hidden=!isProp();
+  $('#pageLede').textContent=isProp()?'Compare forecast-driven long/short signals using transparent synthetic mark-to-market accounting, capital limits and trading costs.':'Compare forecast-driven battery strategies across the saved 15-minute test predictions. Training stays offline; results include battery losses and editable DK1 market and grid fees.';
+  $('#rankingSubtitle').textContent=isProp()?'Same forecast, synthetic position size, costs, and realized price moves':'Same forecast, battery, and realized prices';
+  $('#buyLegend').textContent=isProp()?'Long':'Charge'; $('#sellLegend').textContent=isProp()?'Short':'Discharge';
+  $('#strategyGuideIntro').textContent=isProp()?'Buy/charge signals become long positions and sell/discharge signals become short positions for the next realized DK1 price move. This is a synthetic research proxy, not executable spot arbitrage.':'Charging means buying and storing electricity; discharging means selling it. Predictions choose the action, while realized prices determine the displayed cashflow.';
+  $('#tradeLogTitle').textContent=isProp()?'Long and short position log':'Charge and discharge log';
+  $('#exposureHeader').textContent=isProp()?'Position MWh':'Dispatch MW'; $('#stateHeader').textContent=isProp()?'Price move':'State of charge';
+  $('#buyActionHeader').textContent=isProp()?'Long':'Charge'; $('#sellActionHeader').textContent=isProp()?'Short':'Discharge'; $('#secondaryMetricHeader').textContent=isProp()?'Return':'Degradation';
+  $('#noCostPotentialLabel').textContent=isProp()?'Potential without costs':'Potential without fees'; $('#noCostPotentialNote').textContent=isProp()?'Hindsight; trading cost set to 0':'Hindsight; modeled fees set to 0'; $('#noCostSettingsLabel').textContent=isProp()?'Zero-cost potential parameters (hindsight only)':'No-fee potential parameters (hindsight only)';
+  $('#noCostTableHeader').textContent=isProp()?'Zero-cost potential':'No-fee potential';
+}
 
 function drawLineChart(canvas,rows,series){
   const ctx=canvas.getContext('2d'); const rect=canvas.getBoundingClientRect(); const scale=devicePixelRatio||1;
@@ -266,8 +299,9 @@ function drawLineChart(canvas,rows,series){
 
 function renderPrice(){
   const rows=state.comparison?.selected_strategy_series||[];
-  drawLineChart($('#priceChart'),rows,[{key:'Actual_Price',color:colors.actual,width:1.6},{key:'Forecast_Price',color:colors.forecast,width:1.8},{type:'markers',key:'Actual_Price',action:'charge',shape:'down',color:colors.charge},{type:'markers',key:'Actual_Price',action:'discharge',shape:'up',color:colors.discharge}]);
-  if(rows.length){const start=new Date(rows[0].HourUTC).toLocaleDateString('en-DK');const end=new Date(rows.at(-1).HourUTC).toLocaleDateString('en-DK');const charges=rows.filter(row=>row.Action==='charge').length,discharges=rows.filter(row=>row.Action==='discharge').length;$('#priceSubtitle').textContent=`${rows.length.toLocaleString()} intervals · ${charges} charges · ${discharges} discharges · ${start} to ${end}`}
+  const names=actionNames();
+  drawLineChart($('#priceChart'),rows,[{key:'Actual_Price',color:colors.actual,width:1.6},{key:'Forecast_Price',color:colors.forecast,width:1.8},{type:'markers',key:'Actual_Price',action:names.buy,shape:'down',color:colors.charge},{type:'markers',key:'Actual_Price',action:names.sell,shape:'up',color:colors.discharge}]);
+  if(rows.length){const start=new Date(rows[0].HourUTC).toLocaleDateString('en-DK');const end=new Date(rows.at(-1).HourUTC).toLocaleDateString('en-DK');const buys=rows.filter(row=>row.Action===names.buy).length,sells=rows.filter(row=>row.Action===names.sell).length;$('#priceSubtitle').textContent=`${rows.length.toLocaleString()} intervals · ${buys} ${names.buyLabel.toLowerCase()} · ${sells} ${names.sellLabel.toLowerCase()} · ${start} to ${end}`}
 }
 
 function renderCashflow(){
@@ -283,23 +317,24 @@ function syncStrategySelector(data){
 }
 
 function selectedTrades(){
-  return (state.comparison?.selected_strategy_series||[]).filter(row=>row.Action==='charge'||row.Action==='discharge');
+  const names=actionNames(); return (state.comparison?.selected_strategy_series||[]).filter(row=>row.Action===names.buy||row.Action===names.sell||(isProp()&&Number(row.Transaction_Cost)>0));
 }
 
 function renderTradeLog(){
   const data=state.comparison,trades=selectedTrades();
-  $('#tradeCount').textContent=`${trades.length.toLocaleString()} actions`;
-  $('#tradeSubtitle').textContent=`${data.selected_strategy} · ${data.evaluation.mode==='out_of_sample_optimization'?'unseen test period':'selected period'} · prices and cashflow in DKK/MWh and DKK`;
+  $('#tradeCount').textContent=`${trades.length.toLocaleString()} ${isProp()?'position rows':'actions'}`;
+  $('#tradeSubtitle').textContent=`${data.selected_strategy} · ${data.evaluation.mode==='out_of_sample_optimization'?'unseen test period':'selected period'} · ${isProp()?'synthetic positions and PnL':'prices and cashflow'} in DKK/MWh and DKK`;
   $('#downloadLog').disabled=!trades.length;
   $('#tradeRows').innerHTML=trades.length?trades.map(row=>{
     const time=new Date(row.HourUTC).toLocaleString('en-DK',{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});
-    return `<tr><td>${time}</td><td><span class="action-badge ${row.Action}">${row.Action}</span></td><td class="num">${fmt(row.Actual_Price,2)}</td><td class="num">${fmt(row.Forecast_Price,2)}</td><td class="num">${fmt(Math.abs(row.Dispatch_MW),2)}</td><td class="num">${fmt(row.State_Of_Charge_MWh,2)} MWh</td><td class="num ${row.Cashflow>=0?'positive':'negative-text'}">${cash(row.Cashflow)}</td><td class="num ${row.Cumulative_Cashflow>=0?'positive':'negative-text'}">${cash(row.Cumulative_Cashflow)}</td></tr>`;
-  }).join(''):'<tr><td colspan="8">No charge or discharge actions occurred for this strategy and window.</td></tr>';
+    const exposure=isProp()?fmt(Math.abs(row.Position_MWh),2):fmt(Math.abs(row.Dispatch_MW),2); const stateValue=isProp()?`${fmt(row.Price_Change_DKK,2)} DKK`:`${fmt(row.State_Of_Charge_MWh,2)} MWh`;
+    return `<tr><td>${time}</td><td><span class="action-badge ${row.Action}">${row.Action}</span></td><td class="num">${fmt(row.Actual_Price,2)}</td><td class="num">${fmt(row.Forecast_Price,2)}</td><td class="num">${exposure}</td><td class="num">${stateValue}</td><td class="num ${row.Cashflow>=0?'positive':'negative-text'}">${cash(row.Cashflow)}</td><td class="num ${row.Cumulative_Cashflow>=0?'positive':'negative-text'}">${cash(row.Cumulative_Cashflow)}</td></tr>`;
+  }).join(''):`<tr><td colspan="8">No ${isProp()?'long or short positions':'charge or discharge actions'} occurred for this strategy and window.</td></tr>`;
 }
 
 function downloadTradeLog(){
   const trades=selectedTrades(); if(!trades.length)return;
-  const columns=['HourUTC','Action','Actual_Price','Forecast_Price','Dispatch_MW','State_Of_Charge_MWh','Cashflow','Cumulative_Cashflow'];
+  const columns=isProp()?['HourUTC','Action','Actual_Price','Forecast_Price','Position','Position_MWh','Price_Change_DKK','Gross_Cashflow','Transaction_Cost','Cashflow','Cumulative_Cashflow','Equity_DKK']:['HourUTC','Action','Actual_Price','Forecast_Price','Dispatch_MW','State_Of_Charge_MWh','Cashflow','Cumulative_Cashflow'];
   const csv=[columns.join(','),...trades.map(row=>columns.map(column=>`"${String(row[column]??'').replaceAll('"','""')}"`).join(','))].join('\n');
   const url=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'})); const link=document.createElement('a');
   link.href=url; link.download=`${state.comparison.selected_strategy.toLowerCase().replaceAll(' ','-')}-trade-log.csv`; link.click(); URL.revokeObjectURL(url);
@@ -316,16 +351,18 @@ function renderComparison(){
   const selectedIndex=rows.findIndex(row=>row.Strategy===data.selected_strategy),selected=rows[selectedIndex];
   $('#bestStrategy').textContent=selected.Strategy; $('#bestCashflow').textContent=cash(selected.Cashflow); $('#bestDrawdown').textContent=cash(selected.Max_Drawdown);
   $('#bestStrategyNote').textContent=`Rank #${selectedIndex+1} · ${data.forecast_model}`; $('#trainCashflow').textContent=cash(selected.Train_Cashflow); $('#testPotentialCashflow').textContent=cash(selected.Test_Potential_Cashflow); $('#noFeePotentialCashflow').textContent=cash(selected.No_Fee_Potential_Cashflow); $('#oracleCashflow').textContent=cash(data.perfect_foresight_benchmark?.Cashflow); $('#activeIntervals').textContent=fmt(selected.Active_Intervals,0); $('#riskScore').textContent=cash(selected.Risk_Adjusted_Score);
-  $('#dailySharpe').textContent=fmt(selected.Daily_Sharpe,2); $('#sharpeNote').textContent=`${data.evaluation.daily_observations} complete daily observations · annualized`; $('#finalSoc').textContent=fmt(selected.Final_SOC_MWh,1); $('#efficiencyUsed').textContent=`${fmt(selected.Round_Trip_Efficiency_Pct,1)}%`; $('#modeledFees').textContent=cash(selected.Fee_Cost); $('#strategyDescription').textContent=selected.Description; $('#strategySettings').textContent=selected.Settings; $('#testPotentialSettings').textContent=selected.Test_Potential_Settings||'Available only in optimized mode'; $('#noFeePotentialSettings').textContent=selected.No_Fee_Potential_Settings||'Unavailable'; $('#cashSubtitle').textContent=`${selected.Strategy} · ${data.dataset.selected_rows.toLocaleString()} ${data.evaluation.mode==='out_of_sample_optimization'?'unseen test':'evaluation'} intervals`;
+  $('#dailySharpe').textContent=fmt(selected.Daily_Sharpe,2); $('#sharpeNote').textContent=`${data.evaluation.daily_observations} complete daily observations · annualized`; $('#modeledFees').textContent=cash(selected.Fee_Cost); $('#strategyDescription').textContent=selected.Description; $('#strategySettings').textContent=selected.Settings; $('#testPotentialSettings').textContent=selected.Test_Potential_Settings||'Available only in optimized mode'; $('#noFeePotentialSettings').textContent=selected.No_Fee_Potential_Settings||'Unavailable'; $('#cashSubtitle').textContent=`${selected.Strategy} · ${data.dataset.selected_rows.toLocaleString()} ${data.evaluation.mode==='out_of_sample_optimization'?'unseen test':'evaluation'} intervals · ${isProp()?'synthetic mark-to-market':'physical battery cashflow'}`;
+  if(isProp()){$('#capitalMetricLabel').textContent='Ending equity';$('#capitalMetricValue').textContent=cash(selected.Ending_Equity_DKK);$('#capitalMetricNote').textContent=`Started with ${cash(data.prop.initial_capital_dkk)}`;$('#setupMetricLabel').textContent='Return on capital';$('#setupMetricValue').textContent=pct(selected.Return_Pct);$('#setupMetricNote').textContent=`${fmt(data.prop.position_size_mwh,1)} MWh directional position`;$('#costMetricLabel').textContent='Trading costs';$('#costMetricNote').textContent='Position changes × selected cost';$('#oracleNote').textContent='Hindsight long/flat/short path';$('#activeIntervalsNote').textContent='Long + short';}
+  else{$('#capitalMetricLabel').textContent='Final state of charge';$('#capitalMetricValue').textContent=fmt(selected.Final_SOC_MWh,1);$('#capitalMetricNote').textContent='MWh';$('#setupMetricLabel').textContent='Round-trip efficiency';$('#setupMetricValue').textContent=`${fmt(selected.Round_Trip_Efficiency_Pct,1)}%`;$('#setupMetricNote').textContent='Charge × discharge efficiency';$('#costMetricLabel').textContent='Modeled fees';$('#costMetricNote').textContent='Included in net cashflow';$('#oracleNote').textContent='Actual-price DP benchmark';$('#activeIntervalsNote').textContent='Charge + discharge';}
   const evaluation=data.evaluation;
   if(evaluation.mode==='out_of_sample_optimization'){
     const trainStart=new Date(evaluation.train_start).toLocaleDateString('en-DK'),trainEnd=new Date(evaluation.train_end).toLocaleDateString('en-DK'),testStart=new Date(evaluation.test_start).toLocaleDateString('en-DK'),testEnd=new Date(evaluation.test_end).toLocaleDateString('en-DK');
-    $('#optimizationNote').innerHTML=`<strong>Six-full-day holdout:</strong> each strategy searched its parameter grid on ${evaluation.train_rows.toLocaleString()} earlier intervals (${trainStart}–${trainEnd}), then applied that setting unchanged to ${evaluation.daily_observations} unseen DK1 days (${testStart}–${testEnd}). Best test-grid PnL separately searches those test days with the selected fees; no-fee potential repeats the search with modeled fees at zero. These are the best values found inside each tested grid, not guaranteed profits or results that could have been known beforehand.`;
-  }else{$('#optimizationNote').innerHTML='<strong>Fixed defaults:</strong> no parameter tuning. Rankings use the complete selected history, and the no-fee result reruns the same defaults with modeled fees at zero.'}
+    $('#optimizationNote').innerHTML=`<strong>Six-full-day holdout:</strong> each strategy searched its parameter grid on ${evaluation.train_rows.toLocaleString()} earlier intervals (${trainStart}–${trainEnd}), then applied that setting unchanged to ${evaluation.daily_observations} unseen DK1 days (${testStart}–${testEnd}). Best test-grid PnL separately searches those test days with the selected ${isProp()?'transaction costs':'fees'}; ${isProp()?'zero-cost':'no-fee'} potential repeats the search with modeled costs at zero. These are the best values found inside each tested grid, not guaranteed profits or results that could have been known beforehand.`;
+  }else{$('#optimizationNote').innerHTML=`<strong>Fixed defaults:</strong> no parameter tuning. Rankings use the complete selected history, and the ${isProp()?'zero-cost':'no-fee'} result reruns the same defaults with modeled costs at zero.`}
   const maxAbs=Math.max(...rows.map(row=>Math.abs(row.Cashflow)),1);
   $('#ranking').innerHTML=rows.slice(0,8).map((row,index)=>`<div class="rank-row"><span class="rank">${index+1}</span><span class="rank-name" title="${row.Strategy}">${row.Strategy}</span><span class="bar-track"><span class="bar ${row.Cashflow<0?'negative':''}" style="width:${Math.max(3,Math.abs(row.Cashflow)/maxAbs*100)}%"></span></span><span class="rank-value ${row.Cashflow>=0?'positive':'negative-text'}">${dkk.format(row.Cashflow)}</span></div>`).join('');
-  $('#strategyRows').innerHTML=rows.map((row,index)=>{const uplift=row.Test_Potential_Cashflow==null?null:row.Test_Potential_Cashflow-row.Cashflow;return `<tr class="strategy-row ${row.Strategy===selected.Strategy?'selected-row':''}" data-strategy="${row.Strategy}" title="Click to inspect this strategy"><td>${index+1}</td><td>${row.Strategy}</td><td class="num ${row.Cashflow>=0?'positive':'negative-text'}">${cash(row.Cashflow)}</td><td class="num">${cash(row.Train_Cashflow)}</td><td class="num ${row.Test_Potential_Cashflow>=0?'positive':'negative-text'}">${cash(row.Test_Potential_Cashflow)}</td><td class="num">${cash(uplift)}</td><td class="num ${row.No_Fee_Potential_Cashflow>=0?'positive':'negative-text'}">${cash(row.No_Fee_Potential_Cashflow)}</td><td class="num">${cash(row.Fee_Cost)}</td><td class="num">${cash(row.Degradation_Cost)}</td><td class="num">${cash(row.Max_Drawdown)}</td><td class="num">${cash(row.Risk_Adjusted_Score)}</td><td class="num">${fmt(row.Daily_Sharpe,2)}</td><td class="num">${fmt(row.Active_Intervals,0)}</td><td class="num">${fmt(row.Charge_Intervals,0)}</td><td class="num">${fmt(row.Discharge_Intervals,0)}</td></tr>`}).join('');
-  $('#strategyGuide').innerHTML=rows.map((row,index)=>`<section class="guide-item"><div class="guide-heading"><span class="guide-rank">${index+1}</span><h3>${row.Strategy}</h3></div><p>${row.Description}</p><div class="guide-result"><span>${evaluation.mode==='out_of_sample_optimization'?'OOS test':'This run'}: <strong class="${row.Cashflow>=0?'positive':'negative-text'}">${cash(row.Cashflow)}</strong></span><span>Best test-grid PnL: <strong>${cash(row.Test_Potential_Cashflow)}</strong></span><span>No-fee potential: <strong>${cash(row.No_Fee_Potential_Cashflow)}</strong></span><span><strong>${fmt(row.Active_Intervals,0)}</strong> charge/discharge actions</span></div><div class="guide-settings">${row.Settings}</div></section>`).join('');
+  $('#strategyRows').innerHTML=rows.map((row,index)=>{const uplift=row.Test_Potential_Cashflow==null?null:row.Test_Potential_Cashflow-row.Cashflow;const secondary=isProp()?pct(row.Return_Pct):cash(row.Degradation_Cost);return `<tr class="strategy-row ${row.Strategy===selected.Strategy?'selected-row':''}" data-strategy="${row.Strategy}" title="Click to inspect this strategy"><td>${index+1}</td><td>${row.Strategy}</td><td class="num ${row.Cashflow>=0?'positive':'negative-text'}">${cash(row.Cashflow)}</td><td class="num">${cash(row.Train_Cashflow)}</td><td class="num ${row.Test_Potential_Cashflow>=0?'positive':'negative-text'}">${cash(row.Test_Potential_Cashflow)}</td><td class="num">${cash(uplift)}</td><td class="num ${row.No_Fee_Potential_Cashflow>=0?'positive':'negative-text'}">${cash(row.No_Fee_Potential_Cashflow)}</td><td class="num">${cash(row.Fee_Cost)}</td><td class="num">${secondary}</td><td class="num">${cash(row.Max_Drawdown)}</td><td class="num">${cash(row.Risk_Adjusted_Score)}</td><td class="num">${fmt(row.Daily_Sharpe,2)}</td><td class="num">${fmt(row.Active_Intervals,0)}</td><td class="num">${fmt(row.Charge_Intervals,0)}</td><td class="num">${fmt(row.Discharge_Intervals,0)}</td></tr>`}).join('');
+  $('#strategyGuide').innerHTML=rows.map((row,index)=>`<section class="guide-item"><div class="guide-heading"><span class="guide-rank">${index+1}</span><h3>${row.Strategy}</h3></div><p>${row.Description}</p><div class="guide-result"><span>${evaluation.mode==='out_of_sample_optimization'?'OOS test':'This run'}: <strong class="${row.Cashflow>=0?'positive':'negative-text'}">${cash(row.Cashflow)}</strong></span><span>Best test-grid PnL: <strong>${cash(row.Test_Potential_Cashflow)}</strong></span><span>${isProp()?'Zero-cost':'No-fee'} potential: <strong>${cash(row.No_Fee_Potential_Cashflow)}</strong></span><span><strong>${fmt(row.Active_Intervals,0)}</strong> ${isProp()?'long/short intervals':'charge/discharge actions'}</span></div><div class="guide-settings">${row.Settings}</div></section>`).join('');
   renderCashflow(); renderTradeLog();
 }
 
@@ -334,22 +371,30 @@ async function loadDashboard(){
   const roundTrip=Number($('#roundTrip').value)/100; const oneWayEfficiency=Math.sqrt(roundTrip);
   const strategy=$('#strategy').disabled||!$('#strategy').value?null:$('#strategy').value;
   const optimize=$('#mode').value==='optimized';
-  const request={forecast_col:$('#forecast').value,strategy,days,optimize,test_days:6,battery:{capacity_mwh:Number($('#capacity').value),power_mw:Number($('#power').value),initial_soc_mwh:0,charge_efficiency:oneWayEfficiency,discharge_efficiency:oneWayEfficiency,charge_fee_per_mwh:Number($('#chargeFee').value),discharge_fee_per_mwh:Number($('#dischargeFee').value)}};
+  const dailyLoss=Number($('#dailyLossLimit').value);
+  const request={forecast_col:$('#forecast').value,strategy,days,optimize,test_days:6,trading_setup:state.tradingSetup,battery:{capacity_mwh:Number($('#capacity').value),power_mw:Number($('#power').value),initial_soc_mwh:0,charge_efficiency:oneWayEfficiency,discharge_efficiency:oneWayEfficiency,charge_fee_per_mwh:Number($('#chargeFee').value),discharge_fee_per_mwh:Number($('#dischargeFee').value)},prop:{initial_capital_dkk:Number($('#startingCapital').value),position_size_mwh:Number($('#positionSize').value),transaction_cost_dkk_per_mwh:Number($('#transactionCost').value),max_daily_loss_dkk:dailyLoss>0?dailyLoss:null}};
   setCalculating(true,optimize);
   try{
     const [resultsResponse,comparisonResponse]=await Promise.all([fetch(`/api/results${query}`),fetch('/api/compare',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(request)})]);
     const results=await resultsResponse.json(),comparison=await comparisonResponse.json();
     if(!resultsResponse.ok)throw new Error(results.detail||`Results HTTP ${resultsResponse.status}`); if(!comparisonResponse.ok)throw new Error(comparison.detail||`Comparison HTTP ${comparisonResponse.status}`);
     state.results=results;state.comparison=comparison;renderModelMetrics();renderComparison();renderPrice();
-    $('#sourceNote').textContent=`Source: ${results.dataset.source_forecast_file} · ${results.dataset.rows.toLocaleString()} saved prediction intervals · Wind features: ${results.dataset.feature_source||'not available'} · Strategy calculations use realized prices. Research tooling only.`;
-    setStatus('Results ready','ok',`${comparison.selected_strategy} selected · ${optimize?'out-of-sample optimized':'fixed defaults'} · ${fmt(roundTrip*100,1)}% round trip · fee-adjusted and zero-fee potential calculated.`);
+    $('#sourceNote').textContent=`Source: ${results.dataset.source_forecast_file} · ${results.dataset.rows.toLocaleString()} saved prediction intervals · Wind features: ${results.dataset.feature_source||'not available'} · ${isProp()?'Synthetic directional accounting; not an executable financial-contract backtest.':'Physical battery strategy calculations use realized prices.'} Research tooling only.`;
+    const setupStatus=isProp()?`${fmt(comparison.prop.position_size_mwh,1)} MWh positions · cost-adjusted and zero-cost potential calculated`:`${fmt(roundTrip*100,1)}% round trip · fee-adjusted and zero-fee potential calculated`;
+    setStatus('Results ready','ok',`${comparison.selected_strategy} selected · ${optimize?'out-of-sample optimized':'fixed defaults'} · ${setupStatus}.`);
   }catch(error){setStatus('Calculation failed','bad',error.message)}
   finally{setCalculating(false)}
 }
 
+function setTradingSetup(setup){
+  if(setup===state.tradingSetup)return;
+  state.tradingSetup=setup; state.comparison=null; $('#strategy').disabled=true; $('#strategy').innerHTML='<option value="">Loading strategies…</option>'; updateSetupUI(); loadDashboard();
+}
+
 $('#run').addEventListener('click',loadDashboard); $('#forecast').addEventListener('change',loadDashboard); $('#strategy').addEventListener('change',loadDashboard); $('#mode').addEventListener('change',loadDashboard); $('#window').addEventListener('change',loadDashboard); $('#downloadLog').addEventListener('click',downloadTradeLog);
+document.querySelectorAll('[data-trading-setup]').forEach(button=>button.addEventListener('click',()=>setTradingSetup(button.dataset.tradingSetup)));
 $('#strategyRows').addEventListener('click',event=>{const row=event.target.closest('tr[data-strategy]');if(!row)return;$('#strategy').value=row.dataset.strategy;loadDashboard()});
-window.addEventListener('resize',()=>{renderPrice();renderCashflow()}); loadDashboard();
+window.addEventListener('resize',()=>{renderPrice();renderCashflow()}); updateSetupUI(); loadDashboard();
 </script>
 </body>
 </html>
