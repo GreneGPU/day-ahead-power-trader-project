@@ -25,7 +25,7 @@ training = [
 dashboard = ["streamlit>=1.37", "plotly>=5.23"]
 mlops = ["mlflow>=3.0,<4", "cloudpickle>=3.0"]
 aws = ["boto3>=1.35", "sagemaker>=2.232,<3"]
-dev = ["pytest>=8.0", "ruff>=0.6"]
+dev = ["pytest>=8.0", "ruff>=0.6", "httpx2>=2.0,<3"]
 
 [project.scripts]
 intraday-power-quant = "intraday_power_quant.cli:main"
