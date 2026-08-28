@@ -18,6 +18,9 @@ from .data import (
     transferable_hourly_features,
 )
 from .evaluation import build_metrics_table, calculate_15min_coverage
+from .mlflow_tracking import MLflowRunSettings, log_training_run
+from .model_bundle import ForecastModelBundle
+from .model_gate import ModelGateSettings, evaluate_model_gate, write_model_gate
 from .models import base_model_names, optional_model_status, predict_stacked_ensemble, train_stacked_ensemble
 from .validation import leakage_warnings, make_train_test_split_mask
 
@@ -223,10 +226,49 @@ def run_transfer_learning(config: ProjectConfig) -> dict[str, object]:
     ]
     metrics = build_metrics_table(results, "Actual_Price", metric_specs, metadata)
 
+    bundle = ForecastModelBundle(
+        hourly_model=hourly_source_model,
+        residual_model=residual_model,
+        direct_model=direct_15min_model,
+        hourly_feature_cols=transferable_features,
+        residual_feature_cols=transfer_feature_cols,
+        direct_feature_cols=feature_cols_15,
+        champion_prediction_column=champion_column,
+        time_col=config.time_col,
+        metadata={
+            "project_name": config.project_name,
+            "train_start": train_start,
+            "train_end": train_end,
+            "test_start": test_start,
+            "test_end": test_end,
+            "split_method": config.test_split_method,
+            "source_paths": {key: str(value) for key, value in source_paths.items()},
+        },
+    )
+    bundle_path = bundle.save(output_dir / "power_forecast_bundle.pkl")
+    gate = evaluate_model_gate(
+        metrics=metrics,
+        candidate_prediction_column=champion_column,
+        coverage=coverage,
+        leakage_warnings=warnings,
+        settings=ModelGateSettings(
+            min_coverage_pct=config.model_gate_min_coverage_pct,
+            max_baseline_mae_regression_pct=config.model_gate_max_baseline_mae_regression_pct,
+            require_continuous_15min=config.model_gate_require_continuous_15min,
+            require_no_leakage_warnings=config.model_gate_require_no_leakage_warnings,
+        ),
+    )
+    gate_path = write_model_gate(gate, output_dir / "model_gate.json")
+
     outputs = {
         "hourly_baseline": _write_frame(hourly_baseline_df, output_dir / "hourly_baseline_minute0_predictions"),
         "forecasts": _write_frame(results, output_dir / "transfer_15min_forecasts_detailed"),
         "metrics": _write_frame(metrics, output_dir / "transfer_15min_metrics_detailed"),
+        "model_bundle": {
+            "pickle": str(bundle_path),
+            "metadata": str(bundle_path.with_suffix(".metadata.json")),
+        },
+        "model_gate": str(gate_path),
     }
 
     summary = {
@@ -243,6 +285,7 @@ def run_transfer_learning(config: ProjectConfig) -> dict[str, object]:
         "excluded_hourly_features": excluded_features,
         "leakage_warnings": warnings,
         "champion_prediction_column": champion_column,
+        "model_gate": gate,
         "validation_split": {
             "method": config.test_split_method,
             "label": split_label,
@@ -261,6 +304,28 @@ def run_transfer_learning(config: ProjectConfig) -> dict[str, object]:
     }
     summary_path = output_dir / "run_summary.json"
     summary_path.write_text(json.dumps(summary, indent=2, default=str), encoding="utf-8")
+    if config.mlflow_enabled:
+        registered_model_name = config.mlflow_registered_model_name if gate["passed"] else None
+        summary["mlflow"] = log_training_run(
+            settings=MLflowRunSettings(
+                tracking_uri=config.mlflow_tracking_uri,
+                experiment_name=config.mlflow_experiment_name,
+                registered_model_name=registered_model_name,
+                run_name=f"{config.project_name}-{split_label}",
+            ),
+            bundle=bundle,
+            config_params=config.__dict__,
+            metrics=metrics,
+            artifact_paths=[
+                summary_path,
+                bundle_path,
+                bundle_path.with_suffix(".metadata.json"),
+                gate_path,
+                outputs["metrics"]["csv"],
+                outputs["forecasts"]["csv"],
+            ],
+        )
+        summary_path.write_text(json.dumps(summary, indent=2, default=str), encoding="utf-8")
     summary["summary_path"] = str(summary_path)
     print("\nRun summary:")
     print(summary_path)

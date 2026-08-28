@@ -173,6 +173,14 @@ class ProjectConfig:
     n_splits: int = 5
     use_hourly_baseline_as_residual_feature: bool = True
     champion_prediction_column: str = "TL_Residual_Average"
+    model_gate_min_coverage_pct: float = 99.0
+    model_gate_max_baseline_mae_regression_pct: float = 0.0
+    model_gate_require_continuous_15min: bool = True
+    model_gate_require_no_leakage_warnings: bool = True
+    mlflow_enabled: bool = False
+    mlflow_tracking_uri: str | None = None
+    mlflow_experiment_name: str = "power-trader-dk1-15min"
+    mlflow_registered_model_name: str | None = None
     battery: BatterySettings = field(default_factory=BatterySettings)
     weekly_band: WeeklyBandSettings = field(default_factory=WeeklyBandSettings)
     forecast_edge: ForecastEdgeSettings = field(default_factory=ForecastEdgeSettings)
@@ -277,6 +285,14 @@ def write_config(config: ProjectConfig, path: str | Path) -> None:
         "n_splits": config.n_splits,
         "use_hourly_baseline_as_residual_feature": config.use_hourly_baseline_as_residual_feature,
         "champion_prediction_column": config.champion_prediction_column,
+        "model_gate_min_coverage_pct": config.model_gate_min_coverage_pct,
+        "model_gate_max_baseline_mae_regression_pct": config.model_gate_max_baseline_mae_regression_pct,
+        "model_gate_require_continuous_15min": config.model_gate_require_continuous_15min,
+        "model_gate_require_no_leakage_warnings": config.model_gate_require_no_leakage_warnings,
+        "mlflow_enabled": config.mlflow_enabled,
+        "mlflow_tracking_uri": config.mlflow_tracking_uri,
+        "mlflow_experiment_name": config.mlflow_experiment_name,
+        "mlflow_registered_model_name": config.mlflow_registered_model_name,
         "battery": config.battery.__dict__,
         "weekly_band": config.weekly_band.__dict__,
         "forecast_edge": config.forecast_edge.__dict__,

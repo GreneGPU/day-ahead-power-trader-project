@@ -312,6 +312,14 @@ The full run writes:
 - `outputs/model_run/transfer_15min_forecasts_detailed.csv`
 - `outputs/model_run/transfer_15min_metrics_detailed.csv`
 - `outputs/model_run/run_summary.json`
+- `outputs/model_run/power_forecast_bundle.pkl`
+- `outputs/model_run/model_gate.json`
+
+## MLOps on AWS
+
+The repository includes optional MLflow experiment tracking, a serializable forecasting bundle,
+quality gates, production monitoring metrics, SageMaker training/inference entry points, conditional
+Model Registry registration, batch transform, and CI. See [MLOPS_AWS.md](MLOPS_AWS.md) for setup and commands.
 
 To explicitly build a final-30-day holdout run:
 

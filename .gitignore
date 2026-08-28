@@ -20,3 +20,6 @@ reports/*
 !reports/.gitkeep
 !reports/README.md
 .vercel
+mlruns/
+mlartifacts/
+.sagemaker/
