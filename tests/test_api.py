@@ -59,7 +59,14 @@ def test_deployment_results_use_real_predictions() -> None:
     payload = response.json()
     assert payload["dataset"]["rows"] == 2116
     assert len(payload["prices"]) == 2116
-    assert len(payload["model_metrics"]) == 3
+    assert len(payload["model_metrics"]) == 11
+    stacking_tl = next(
+        row
+        for row in payload["model_metrics"]
+        if row["Model"] == "Ensemble pure stacking — TL 15-minute EPF"
+    )
+    assert stacking_tl["MAE"] == 18.53
+    assert stacking_tl["MAE_Improvement_Pct"] == 10.22
     assert payload["prices"][0]["Actual_Price"] == 106.029999
     assert math.isclose(payload["prices"][0]["Actual_Price_DKK"], 792.200382, abs_tol=1e-6)
     assert payload["prices"][0]["Imbalance_Price_DKK"] == 1307.51

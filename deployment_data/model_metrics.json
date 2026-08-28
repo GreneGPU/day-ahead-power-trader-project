@@ -2,6 +2,7 @@
   {
     "Model": "Hourly baseline only",
     "Model_Type": "Hourly source baseline",
+    "Metric_Source": "Project holdout",
     "Number_Features": 1,
     "Test_Start": "2026-02-10T22:00:00Z",
     "Test_End": "2026-03-04T22:45:00Z",
@@ -15,6 +16,7 @@
   {
     "Model": "Direct 15-min ensemble",
     "Model_Type": "15-min scratch",
+    "Metric_Source": "Project holdout",
     "Number_Features": 75,
     "Test_Start": "2026-02-10T22:00:00Z",
     "Test_End": "2026-03-04T22:45:00Z",
@@ -28,6 +30,7 @@
   {
     "Model": "Transfer residual ensemble",
     "Model_Type": "Transfer learning",
+    "Metric_Source": "Project holdout",
     "Number_Features": 76,
     "Test_Start": "2026-02-10T22:00:00Z",
     "Test_End": "2026-03-04T22:45:00Z",
@@ -37,5 +40,93 @@
     "RMSE": 24.95936894278714,
     "sMAPE": 20.57133539975063,
     "R2": 0.4797644521272072
+  },
+  {
+    "Model": "SARIMAX — Direct 15-minute EPF",
+    "Model_Type": "Direct 15-minute EPF benchmark",
+    "Metric_Source": "Provided model comparison",
+    "MAE": 20.05,
+    "RMSE": 27.55,
+    "sMAPE": 22.46,
+    "R2": 0.37
+  },
+  {
+    "Model": "SARIMAX — TL 15-minute EPF",
+    "Model_Type": "Transfer-learning benchmark",
+    "Metric_Source": "Provided model comparison",
+    "MAE": 18.66,
+    "RMSE": 26.0,
+    "sMAPE": 20.77,
+    "R2": 0.44,
+    "MAE_Improvement_Pct": 6.93,
+    "RMSE_Improvement_Pct": 5.63,
+    "sMAPE_Improvement_Pct": 7.52,
+    "R2_Improvement": 0.07
+  },
+  {
+    "Model": "Ensemble pure stacking — Direct 15-minute EPF",
+    "Model_Type": "Direct 15-minute EPF benchmark",
+    "Metric_Source": "Provided model comparison",
+    "MAE": 21.23,
+    "RMSE": 28.85,
+    "sMAPE": 23.17,
+    "R2": 0.30
+  },
+  {
+    "Model": "Ensemble pure stacking — TL 15-minute EPF",
+    "Model_Type": "Transfer-learning benchmark",
+    "Metric_Source": "Provided model comparison",
+    "MAE": 18.53,
+    "RMSE": 25.47,
+    "sMAPE": 20.42,
+    "R2": 0.45,
+    "MAE_Improvement_Pct": 10.22,
+    "RMSE_Improvement_Pct": 12.39,
+    "sMAPE_Improvement_Pct": 8.37,
+    "R2_Improvement": 0.16
+  },
+  {
+    "Model": "LSTM — Direct 15-minute EPF",
+    "Model_Type": "Direct 15-minute EPF benchmark",
+    "Metric_Source": "Provided model comparison",
+    "MAE": 22.06,
+    "RMSE": 31.29,
+    "sMAPE": 24.34,
+    "R2": 0.20
+  },
+  {
+    "Model": "LSTM — TL 15-minute EPF",
+    "Model_Type": "Transfer-learning benchmark",
+    "Metric_Source": "Provided model comparison",
+    "MAE": 24.78,
+    "RMSE": 33.87,
+    "sMAPE": 26.68,
+    "R2": 0.06,
+    "MAE_Improvement_Pct": -12.33,
+    "RMSE_Improvement_Pct": -8.25,
+    "sMAPE_Improvement_Pct": -9.61,
+    "R2_Improvement": -0.14
+  },
+  {
+    "Model": "CNN-LSTM — Direct 15-minute EPF",
+    "Model_Type": "Direct 15-minute EPF benchmark",
+    "Metric_Source": "Provided model comparison",
+    "MAE": 19.87,
+    "RMSE": 31.42,
+    "sMAPE": 22.84,
+    "R2": 0.20
+  },
+  {
+    "Model": "CNN-LSTM — TL 15-minute EPF",
+    "Model_Type": "Transfer-learning benchmark",
+    "Metric_Source": "Provided model comparison",
+    "MAE": 19.29,
+    "RMSE": 29.33,
+    "sMAPE": 21.94,
+    "R2": 0.30,
+    "MAE_Improvement_Pct": 2.92,
+    "RMSE_Improvement_Pct": 6.65,
+    "sMAPE_Improvement_Pct": 3.94,
+    "R2_Improvement": 0.10
   }
 ]

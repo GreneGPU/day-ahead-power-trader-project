@@ -220,8 +220,8 @@
     </article>
 
     <article class="card wide">
-      <div class="card-head"><div><h2>Forecast model metrics</h2><p>Original EUR/MWh holdout metrics exported from the thesis result workbook.</p></div></div>
-      <div class="table-wrap"><table class="model-table"><thead><tr><th>Model</th><th>Type</th><th class="num">Features</th><th class="num">MAE EUR</th><th class="num">RMSE EUR</th><th class="num">sMAPE</th><th class="num">R²</th><th class="num">Coverage</th></tr></thead><tbody id="modelRows"></tbody></table></div>
+      <div class="card-head"><div><h2>Forecast model metrics</h2><p>Project holdout results and the supplied direct-versus-transfer-learning EPF benchmarks.</p></div></div>
+      <div class="table-wrap"><table class="model-table"><thead><tr><th>Model</th><th>Type</th><th>Source</th><th class="num">Features</th><th class="num">MAE EUR</th><th class="num">RMSE EUR</th><th class="num">sMAPE</th><th class="num">R²</th><th class="num">MAE improvement</th><th class="num">Coverage</th></tr></thead><tbody id="modelRows"></tbody></table></div>
     </article>
   </section>
   <footer id="sourceNote">Research tooling only — not financial advice or a production trading system.</footer>
@@ -385,7 +385,7 @@ function downloadTradeLog(){
 function renderModelMetrics(){
   const metrics=state.results.model_metrics; const selected=metricForForecast(metrics,$('#forecast').value);
   $('#modelMae').textContent=selected?`${fmt(selected.MAE,2)} EUR/MWh`:'—'; $('#datasetNote').textContent=selected?selected.Model:'Model metric unavailable';
-  $('#modelRows').innerHTML=metrics.map(row=>`<tr><td>${row.Model}</td><td>${row.Model_Type}</td><td class="num">${fmt(row.Number_Features,0)}</td><td class="num">${fmt(row.MAE,2)}</td><td class="num">${fmt(row.RMSE,2)}</td><td class="num">${fmt(row.sMAPE,2)}%</td><td class="num">${fmt(row.R2,3)}</td><td class="num">${fmt(row.Test_Coverage_Pct,0)}%</td></tr>`).join('');
+  $('#modelRows').innerHTML=metrics.map(row=>`<tr><td>${row.Model}</td><td>${row.Model_Type}</td><td>${row.Metric_Source||'—'}</td><td class="num">${fmt(row.Number_Features,0)}</td><td class="num">${fmt(row.MAE,2)}</td><td class="num">${fmt(row.RMSE,2)}</td><td class="num">${fmt(row.sMAPE,2)}%</td><td class="num">${fmt(row.R2,3)}</td><td class="num">${row.MAE_Improvement_Pct==null?'—':`${fmt(row.MAE_Improvement_Pct,2)}%`}</td><td class="num">${row.Test_Coverage_Pct==null?'—':`${fmt(row.Test_Coverage_Pct,0)}%`}</td></tr>`).join('');
 }
 
 function renderComparison(){
