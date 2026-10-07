@@ -4,6 +4,39 @@ Transfer-learning 15-minute day-ahead electricity-price forecasting, physical ba
 
 Live dashboard: https://greneportfolio.vercel.app/
 
+## Visitor analytics (PostHog)
+
+The public dashboard tracks pageviews, page leaves, and interactions with the
+[PostHog JavaScript SDK](https://posthog.com/docs/libraries/js). Tracking runs only
+on Vercel production deployments with valid settings. Local development, previews,
+and deployments without configuration send no analytics.
+
+To activate:
+
+1. Create a PostHog project and copy its public project token from Project settings
+   (`phc_...`, **not** a personal API key).
+2. In the Vercel project's **Settings > Environment Variables**, add these for
+   **Production**:
+   - `POSTHOG_PROJECT_TOKEN`: the public project token.
+   - `POSTHOG_HOST`: `https://eu.i.posthog.com` for EU projects, or
+     `https://us.i.posthog.com` for US projects.
+3. Deploy this version, or redeploy after changing the environment variables.
+4. Visit the production dashboard with an ad blocker disabled for the test and
+   confirm a `$pageview` in PostHog's live events. Open **Web analytics** for visitor
+   counts, pageviews, referring sites, and visit duration. These are visits recorded
+   after activation; historical visits cannot be recovered by this integration.
+
+`/api/analytics-config` exposes only the public token and ingestion host. Analytics
+loads independently of the dashboard, so blocked requests or PostHog outages do
+not stop charts or calculations. Automatic interaction capture, session recordings,
+dead-click tracking, and heatmaps are enabled. Session replay masks all input values;
+console logs, automatic exceptions, performance capture, and surveys are disabled.
+PostHog project settings control recording sampling and canvas capture. The SDK
+retains anonymous browser identifiers using its default persistence to count returning
+visitors; no login identity is sent. Recordings begin after activation and cannot
+reconstruct earlier visits. In Session replay, clear device filters to see both
+desktop and mobile visitors.
+
 The dashboard opens from precomputed battery and Prop snapshots, so visiting or refreshing the
 site does not rerun the strategy grids. Changing controls keeps the displayed snapshot in place and marks
 the settings as pending; `Compare strategies` is the explicit recalculation action. Strategy selection is

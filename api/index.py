@@ -5,12 +5,13 @@ from functools import lru_cache
 import gzip
 import json
 import math
+import os
 from pathlib import Path
 import sys
 from typing import Any
 
 import pandas as pd
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Response
 from pydantic import BaseModel, Field
 
 
@@ -240,6 +241,21 @@ def api_root() -> dict[str, Any]:
 @app.get("/api/health")
 def health() -> dict[str, str]:
     return {"status": "ok", "service": "day-ahead-power-trader"}
+
+
+@app.get("/api/analytics-config")
+def analytics_config(response: Response) -> dict[str, Any]:
+    """Expose only the public browser token, and only on production deployments."""
+    response.headers["Cache-Control"] = "no-store"
+    token = os.environ.get("POSTHOG_PROJECT_TOKEN", "").strip()
+    host = os.environ.get("POSTHOG_HOST", "").strip().rstrip("/")
+    if (
+        os.environ.get("VERCEL_ENV") != "production"
+        or not token.startswith("phc_")
+        or host not in {"https://eu.i.posthog.com", "https://us.i.posthog.com"}
+    ):
+        return {"enabled": False}
+    return {"enabled": True, "token": token, "host": host}
 
 
 @app.get("/api/strategies")

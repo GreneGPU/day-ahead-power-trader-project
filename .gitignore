@@ -23,3 +23,5 @@ reports/*
 mlruns/
 mlartifacts/
 .sagemaker/
+.env*
+!.env.example
