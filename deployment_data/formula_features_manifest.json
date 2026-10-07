@@ -1,0 +1,25 @@
+{
+  "source_file": "final_15min_day_ahead_safe_modeling_dataset.csv",
+  "source_sha256": "d9c51b57c71bc72c590f00c333943ce844ce145bc0810c7d24057f571899f0b2",
+  "rows": 2116,
+  "columns": [
+    "system_balance_MWh_known_lag96",
+    "temperature_lag_96",
+    "temperature_lag_192",
+    "temperature_lag_672",
+    "humidity_lag_96",
+    "humidity_lag_192",
+    "humidity_lag_672",
+    "weather_wind_speed_lag_96",
+    "weather_wind_speed_lag_192",
+    "weather_wind_speed_lag_672",
+    "gas_price_lag_96",
+    "gas_price_lag_192",
+    "gas_price_lag_672",
+    "gas_price_change_1d_known_lag96",
+    "gas_price_roll_mean_7d_known_lag96",
+    "load_fc"
+  ],
+  "timestamp_format": "%d-%m-%y %H:%M (UTC)",
+  "lag_policy": "Preserve supplied lagged values; no recomputation, filling or extra shifting."
+}

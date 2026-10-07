@@ -3,140 +3,246 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Day-Ahead Power Trading Project</title>
+  <title>Power Trading Research</title>
+  <meta name="description" content="A transfer-learning model for DK1 day-ahead power prices, from raw market data to signals and replayable bidding decisions.">
+  <link rel="stylesheet" href="/site.css">
   <script src="/analytics.js" defer></script>
   <style>
-    :root {
-      color-scheme: dark;
-      --bg:#06101d; --panel:#0d1b2d; --panel2:#102238; --line:#213955;
-      --text:#edf5ff; --muted:#8ea5bf; --blue:#61adff; --green:#3fe09d;
-      --orange:#ffb55f; --red:#ff6b7a; --shadow:0 24px 80px rgba(0,0,0,.22);
-    }
-    * { box-sizing:border-box; }
-    body { margin:0; min-height:100vh; color:var(--text); background:radial-gradient(circle at 88% 0,#153b65 0,transparent 31%),var(--bg); font:14px/1.5 Inter,ui-sans-serif,system-ui,-apple-system,sans-serif; }
-    main { width:min(1240px,calc(100% - 32px)); margin:auto; padding:54px 0 72px; }
-    header { display:flex; align-items:flex-end; justify-content:space-between; gap:24px; margin-bottom:28px; }
-    .eyebrow { color:var(--green); font-size:11px; font-weight:850; letter-spacing:.17em; text-transform:uppercase; }
-    h1 { margin:8px 0 8px; font-size:clamp(35px,5vw,62px); line-height:1; letter-spacing:-.045em; }
-    .lede { margin:0; max-width:720px; color:var(--muted); font-size:16px; }
-    .api-link { flex:0 0 auto; color:var(--text); text-decoration:none; border:1px solid var(--line); border-radius:10px; padding:10px 14px; background:rgba(14,30,49,.7); }
-    .controls { display:grid; grid-template-columns:1.5fr 1.5fr 1fr repeat(3,.75fr); gap:12px; align-items:end; padding:18px; border:1px solid var(--line); border-radius:16px; background:rgba(11,27,45,.86); box-shadow:var(--shadow); }
-    [hidden] { display:none!important; }
-    .fee-control,.setup-control { grid-column:span 2; }
-    .controls button { grid-column:span 1; }
-    .segmented { display:grid; grid-template-columns:repeat(2,1fr); margin-top:6px; padding:3px; border:1px solid var(--line); border-radius:9px; background:#071421; }
-    .segmented button { min-height:34px; padding:0 12px; border-radius:6px; color:var(--muted); background:transparent; }
-    .controls .segmented button { grid-column:auto; }
-    .segmented button.active { color:#06101d; background:var(--green); }
-    label { display:block; color:var(--muted); font-size:11px; font-weight:750; letter-spacing:.05em; text-transform:uppercase; }
-    select,input { width:100%; margin-top:6px; padding:10px 11px; border:1px solid var(--line); border-radius:9px; color:var(--text); background:#071421; font:inherit; outline:none; }
-    select:focus,input:focus { border-color:var(--blue); }
-    button { min-height:41px; border:0; border-radius:10px; padding:0 17px; background:var(--blue); color:#06101d; font:inherit; font-weight:850; cursor:pointer; }
-    button:disabled { opacity:.55; cursor:wait; }
-    .cost-note { margin:11px 3px 0; color:var(--muted); font-size:11px; }
-    .cost-note strong { color:var(--text); }
-    .cost-note a { color:var(--blue); }
-    .optimization-note { margin:13px 3px 0; padding:10px 12px; color:var(--muted); border-left:3px solid var(--blue); background:rgba(97,173,255,.06); font-size:12px; }
-    .optimization-note strong { color:var(--text); }
-    .calculation-state { display:grid; grid-template-columns:auto minmax(0,1fr) auto; align-items:center; gap:12px; margin:13px 0 0; padding:13px 15px; border:1px solid rgba(97,173,255,.38); border-radius:10px; color:var(--text); background:rgba(10,31,52,.94); box-shadow:0 12px 34px rgba(0,0,0,.18); }
-    .calculation-state strong,.calculation-state span { display:block; }
-    .calculation-state small { display:block; margin-top:2px; color:var(--muted); }
-    .calculation-spinner { width:18px; height:18px; border:2px solid rgba(97,173,255,.22); border-top-color:var(--blue); border-radius:50%; animation:spin .8s linear infinite; }
-    .calculation-state.ok { border-color:rgba(63,224,157,.34); }
-    .calculation-state.ok .calculation-spinner { border-color:var(--green); animation:none; }
-    .calculation-state.dirty { border-color:rgba(255,181,95,.42); }
-    .calculation-state.dirty .calculation-spinner { border-color:var(--orange); animation:none; }
-    .calculation-state.bad { border-color:rgba(255,107,122,.42); }
-    .calculation-state.bad .calculation-spinner { border-color:var(--red); animation:none; }
-    .calculation-elapsed { color:var(--muted); font-size:12px; font-variant-numeric:tabular-nums; }
-    body.is-calculating .metrics,body.is-calculating .grid { opacity:.58; filter:saturate(.72); pointer-events:none; transition:opacity .18s ease; }
-    @keyframes spin { to { transform:rotate(360deg); } }
-    .metrics { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin:22px 0 14px; }
-    .metric,.card { border:1px solid var(--line); border-radius:15px; background:linear-gradient(145deg,rgba(16,34,56,.94),rgba(8,22,38,.94)); box-shadow:var(--shadow); }
-    .metric { display:flex; flex-direction:column; min-width:0; padding:18px; min-height:110px; }
-    .metric span { color:var(--muted); font-size:12px; }
-    .metric strong { display:block; margin:7px 0 2px; font-size:clamp(21px,2.5vw,31px); letter-spacing:-.035em; color:var(--green); }
-    .metric small { display:block; overflow:hidden; margin-top:auto; color:var(--muted); text-overflow:ellipsis; white-space:nowrap; }
-    .grid { display:grid; grid-template-columns:1.45fr .75fr; gap:14px; margin-top:14px; }
-    .card { padding:20px; min-width:0; }
-    .card-head { display:flex; align-items:flex-start; justify-content:space-between; gap:18px; margin-bottom:14px; }
-    h2 { margin:0; font-size:17px; }
-    .card p { margin:4px 0 0; color:var(--muted); font-size:12px; }
-    canvas { display:block; width:100%; height:300px; border-radius:10px; background:rgba(3,12,22,.45); }
-    #cashflowChart { height:260px; }
-    #imbalanceChart { height:260px; }
-    .imbalance-card { grid-column:1/-1; }
-    .cashflow-card { grid-column:2; grid-row:2; align-self:start; }
-    .strategy-details-card { grid-column:1; grid-row:2; }
-    .detail-metrics { grid-template-columns:repeat(4,minmax(0,1fr)); margin:10px 0 0; }
-    .legend { display:flex; flex-wrap:wrap; gap:8px 14px; color:var(--muted); font-size:12px; }
-    .legend span::before { content:""; display:inline-block; width:16px; height:2px; margin:0 6px 3px 0; background:var(--blue); }
-    .legend .forecast::before { background:var(--green); }
-    .legend .imbalance::before { background:var(--orange); }
-    .legend .charge::before,.legend .discharge::before { width:8px; height:8px; margin-bottom:0; border-radius:50%; background:var(--orange); }
-    .legend .discharge::before { background:#e879f9; }
-    .ranking { display:grid; gap:10px; margin-top:15px; }
-    .rank-row { display:grid; grid-template-columns:24px minmax(110px,1fr) 1.3fr auto; align-items:center; gap:9px; }
-    .rank { color:var(--muted); font-variant-numeric:tabular-nums; }
-    .rank-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-    .bar-track { height:8px; overflow:hidden; border-radius:20px; background:#071321; }
-    .bar { display:block; height:100%; border-radius:inherit; background:var(--green); }
-    .bar.negative { background:var(--red); }
-    .rank-value { min-width:82px; text-align:right; font-variant-numeric:tabular-nums; }
-    .wide { grid-column:1/-1; }
-    .table-wrap { overflow:auto; border:1px solid var(--line); border-radius:11px; }
-    table { width:100%; border-collapse:collapse; min-width:880px; }
-    th,td { padding:11px 12px; border-bottom:1px solid rgba(33,57,85,.74); text-align:left; white-space:nowrap; }
-    th { position:sticky; top:0; z-index:1; color:var(--muted); background:#0a1828; font-size:10px; letter-spacing:.07em; text-transform:uppercase; }
-    td.num,th.num { text-align:right; font-variant-numeric:tabular-nums; }
-    tbody tr:first-child { background:rgba(63,224,157,.06); }
-    tbody tr:last-child td { border-bottom:0; }
-    .positive { color:var(--green); } .negative-text { color:var(--red); }
-    tr.selected-row { background:rgba(97,173,255,.12); }
-    tr.strategy-row { cursor:pointer; }
-    .model-table { min-width:780px; }
-    .log-wrap { max-height:520px; }
-    .log-actions { display:flex; align-items:center; gap:12px; }
-    .log-actions span { color:var(--muted); font-size:12px; }
-    .secondary-button { min-height:34px; padding:0 12px; color:var(--text); border:1px solid var(--line); background:#0a1b2d; font-size:12px; }
-    .action-badge { display:inline-flex; min-width:76px; justify-content:center; padding:3px 8px; border-radius:20px; font-size:11px; font-weight:800; text-transform:uppercase; }
-    .action-badge.charge { color:var(--blue); background:rgba(97,173,255,.12); }
-    .action-badge.discharge { color:var(--green); background:rgba(63,224,157,.12); }
-    .action-badge.long,.action-badge.long-spread { color:var(--green); background:rgba(63,224,157,.12); }
-    .action-badge.short,.action-badge.short-spread { color:var(--red); background:rgba(255,107,122,.12); }
-    .action-badge.exit,.action-badge.risk-off { color:var(--orange); background:rgba(255,181,95,.12); }
-    .action-badge.imbalance-close-long,.action-badge.imbalance-close-short { color:#06101d; background:var(--orange); }
-    .strategy-guide { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); align-items:stretch; gap:12px; }
-    .guide-item { display:grid; grid-template-rows:auto minmax(64px,1fr) auto auto; min-height:218px; padding:16px; border:1px solid var(--line); border-radius:12px; background:rgba(5,17,30,.48); }
-    .guide-heading { display:flex; align-items:center; gap:10px; margin-bottom:7px; }
-    .guide-rank { display:grid; flex:0 0 28px; width:28px; height:28px; place-items:center; border-radius:8px; color:#06101d; background:var(--green); font-size:12px; font-weight:850; }
-    .guide-item h3 { margin:0; font-size:15px; }
-    .guide-item p { margin:0; font-size:13px; line-height:1.55; }
-    .guide-result { display:flex; flex-wrap:wrap; align-items:flex-end; gap:7px 14px; margin-top:11px; padding-top:11px; border-top:1px solid rgba(33,57,85,.55); color:var(--muted); font-size:11px; }
-    .guide-result strong { color:var(--text); font-weight:750; }
-    .guide-settings { min-height:40px; margin-top:8px; color:var(--muted); font:11px/1.45 ui-monospace,SFMono-Regular,Consolas,monospace; }
-    .settings-box { margin-top:12px; padding:12px 14px; border:1px solid var(--line); border-radius:10px; background:rgba(4,15,27,.46); }
-    .settings-box span { display:block; margin-bottom:5px; color:var(--muted); font-size:11px; text-transform:uppercase; }
-    .settings-box code { color:var(--text); white-space:normal; word-break:break-word; }
-    footer { margin-top:20px; color:var(--muted); font-size:12px; }
-    @media (max-width:980px) { .controls{grid-template-columns:repeat(3,1fr)} .fee-control,.setup-control,.controls button{grid-column:span 1}.grid{grid-template-columns:1fr}.metrics{grid-template-columns:repeat(2,1fr)}.cashflow-card,.strategy-details-card{grid-column:1;grid-row:auto;align-self:stretch}.detail-metrics{grid-template-columns:repeat(2,minmax(0,1fr))} }
-    @media (max-width:700px) { .strategy-guide{grid-template-columns:1fr} }
-    @media (max-width:620px) { main{padding:34px 0}header{align-items:flex-start;flex-direction:column}.controls{grid-template-columns:1fr 1fr}.controls>div:first-child,.controls button{grid-column:1/-1}.calculation-state{grid-template-columns:auto 1fr}.calculation-elapsed{grid-column:2}.metrics{grid-template-columns:1fr 1fr}.metric{min-height:95px;padding:14px}.card{padding:15px}.rank-row{grid-template-columns:20px 1fr auto}.bar-track{display:none} }
+    /* Benchmark dashboard, light theme. Scoped to .dash so it never restyles site chrome. */
+    .dash{--blue:#0a2540;--fc:#533afd;--orange:#d97706;--charge:#f97316;--discharge:#0891b2}
+    .workspace-nav{display:inline-flex;gap:4px;padding:4px;margin-bottom:20px;border:1px solid var(--line);border-radius:8px;background:#fff}
+    .workspace-nav button,.workspace-nav a{display:flex;align-items:center;justify-content:center;min-height:38px;padding:8px 16px;border:0;border-radius:5px;background:transparent;color:var(--ink);font:500 14px/1.2 var(--font);text-decoration:none;cursor:pointer}
+    .workspace-nav button:hover,.workspace-nav a:hover{background:var(--bg-soft)}
+    .workspace-nav .active{background:var(--accent);color:#fff}.workspace-nav .active:hover{background:var(--accent-hover)}
+    .dash .controls{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px 16px;align-items:end;padding:22px;border:1px solid var(--line);border-radius:8px;background:#fff;box-shadow:0 15px 35px -20px rgba(50,50,93,.25)}
+    .dash .controls>div{min-width:0}
+    .dash label{display:block;margin:10px 0 6px;color:var(--ink);font-size:13px;font-weight:500}
+    .dash select,.dash input{width:100%;min-width:0;min-height:42px;padding:8px 11px;border:1px solid var(--line-strong);border-radius:4px;background:#fff;color:var(--ink);font:14px var(--font)}
+    .dash select:focus,.dash input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(83,58,253,.15)}
+    .dash .controls button{min-height:42px;border:0;border-radius:4px;padding:0 18px;background:var(--accent);color:#fff;font:500 14px var(--font);cursor:pointer}
+    .dash .controls button:hover{background:var(--accent-hover)}
+    .dash button:disabled{opacity:.55;cursor:wait}
+    .help-details{margin:14px 0 0;color:var(--muted);font-size:14px}.help-details summary{cursor:pointer;color:var(--ink);font-weight:500}.help-details:has(>div[hidden]){display:none}
+    .cost-note{margin:10px 0 0;color:var(--muted);font-size:13px;line-height:1.65}.cost-note strong{color:var(--ink)}
+    .optimization-note{margin:10px 0 0;padding:12px 14px;color:var(--muted);border-left:3px solid var(--accent);background:var(--accent-soft);font-size:13px;line-height:1.65}.optimization-note strong{color:var(--ink)}
+    .calculation-state{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:12px;margin:16px 0 0;padding:13px 16px;border:1px solid #d5ceff;border-radius:8px;background:#fff;color:var(--ink)}
+    .calculation-state strong,.calculation-state span{display:block}.calculation-state strong{font-weight:500}
+    .calculation-state small{display:block;margin-top:2px;color:var(--muted)}
+    .calculation-spinner{width:18px;height:18px;border:2px solid rgba(83,58,253,.2);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite}
+    .calculation-state.ok{border-color:rgba(11,138,94,.35)}.calculation-state.ok .calculation-spinner{border-color:var(--green);animation:none}
+    .calculation-state.dirty{border-color:rgba(217,119,6,.4)}.calculation-state.dirty .calculation-spinner{border-color:var(--orange);animation:none}
+    .calculation-state.bad{border-color:rgba(207,46,91,.4)}.calculation-state.bad .calculation-spinner{border-color:var(--red);animation:none}
+    .calculation-elapsed{color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums}
+    body.is-calculating .dash .metrics,body.is-calculating .dash .grid{opacity:.55;pointer-events:none;transition:opacity .18s ease}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    .dash .metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:0;margin:20px 0 16px;border:1px solid var(--line);border-radius:8px;background:#fff;overflow:hidden}
+    .dash .metric{display:flex;flex-direction:column;min-width:0;padding:20px;min-height:116px;border-right:1px solid var(--line)}
+    .dash .metric:last-child{border-right:0}
+    .dash .metric span{color:var(--muted);font-size:12px}
+    .dash .metric strong{display:block;margin:8px 0 4px;color:var(--ink);font-weight:300;font-size:clamp(21px,2.4vw,30px);letter-spacing:-.02em;overflow-wrap:anywhere}
+    .dash .metric small{display:block;margin-top:auto;color:var(--muted);font-size:12px}
+    .dash .detail-metrics{grid-template-columns:repeat(4,minmax(0,1fr));margin:10px 0 0;border:0;border-top:1px solid var(--line);border-radius:0}
+    .dash .detail-metrics .metric{border-bottom:1px solid var(--line);min-height:100px;padding:16px}
+    .dash .detail-metrics .metric:nth-child(4n){border-right:0}
+    .dash .detail-metrics .metric strong{font-size:22px}
+    .grid{display:grid;grid-template-columns:1.45fr .75fr;gap:16px;margin-top:16px}
+    .card{padding:22px;min-width:0;border:1px solid var(--line);border-radius:8px;background:#fff}
+    .card-head{display:flex;align-items:flex-start;justify-content:space-between;gap:18px;margin-bottom:14px}
+    .card h2{margin:0;color:var(--ink);font-size:17px;font-weight:500}
+    .card p{margin:4px 0 0;color:var(--muted);font-size:13px;line-height:1.6}
+    .dash canvas{display:block;width:100%;height:300px;border-radius:6px;background:#fbfcfe;border:1px solid #eef1f6}
+    #cashflowChart,#imbalanceChart{height:260px}
+    .imbalance-card{grid-column:1/-1}.cashflow-card{grid-column:2;grid-row:2;align-self:start}.strategy-details-card{grid-column:1;grid-row:2}
+    .legend{display:flex;flex-wrap:wrap;gap:8px 14px;color:var(--muted);font-size:12px}
+    .legend span::before{content:"";display:inline-block;width:16px;height:2px;margin:0 6px 3px 0;background:var(--blue)}
+    .legend .forecast::before{background:var(--fc)}.legend .imbalance::before{background:var(--orange)}
+    .legend .charge::before,.legend .discharge::before{width:8px;height:8px;margin-bottom:0;border-radius:50%;background:var(--charge)}
+    .legend .discharge::before{background:var(--discharge)}
+    .ranking{display:grid;gap:12px;margin-top:15px}
+    .rank-row{display:grid;grid-template-columns:24px minmax(110px,1fr) 1.3fr auto;align-items:center;gap:10px;font-size:14px;color:var(--ink)}
+    .rank{color:var(--muted);font:12px var(--mono)}
+    .rank-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .bar-track{height:6px;overflow:hidden;border-radius:3px;background:#eef1f6}
+    .bar{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,#7a5cff,var(--accent))}
+    .bar.negative{background:var(--red)}
+    .rank-value{min-width:82px;text-align:right;font-variant-numeric:tabular-nums}
+    .wide{grid-column:1/-1}
+    .dash .table-wrap{overflow:auto;border:1px solid var(--line);border-radius:6px}
+    .dash table{width:100%;border-collapse:collapse;min-width:880px;font-size:13px}
+    .dash th,.dash td{padding:11px 12px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap;color:var(--ink)}
+    .dash th{position:sticky;top:0;z-index:1;color:var(--muted);background:var(--bg-soft);font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase}
+    .dash td.num,.dash th.num{text-align:right;font-variant-numeric:tabular-nums}
+    .dash tbody tr:last-child td{border-bottom:0}
+    .positive{color:var(--green)!important}.negative-text{color:var(--red)!important}
+    tr.selected-row{background:var(--accent-soft)}tr.strategy-row{cursor:pointer}tr.strategy-row:hover{background:#fafbff}
+    .model-table{min-width:780px}.log-wrap{max-height:520px}
+    .log-actions{display:flex;align-items:center;gap:12px}.log-actions span{color:var(--muted);font-size:12px}
+    .secondary-button{min-height:34px;padding:0 12px;border:1px solid #d5ceff;border-radius:4px;background:#fff;color:var(--accent);font:500 13px var(--font);cursor:pointer}
+    .secondary-button:hover{border-color:var(--accent)}
+    .action-badge{display:inline-flex;min-width:76px;justify-content:center;padding:3px 8px;border-radius:4px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.03em}
+    .action-badge.charge,.action-badge.short,.action-badge.short-spread{color:var(--red);background:rgba(207,46,91,.08)}
+    .action-badge.discharge,.action-badge.long,.action-badge.long-spread{color:var(--green);background:rgba(11,138,94,.08)}
+    .action-badge.exit,.action-badge.risk-off{color:var(--orange);background:rgba(217,119,6,.1)}
+    .action-badge.imbalance-close-long,.action-badge.imbalance-close-short{color:#fff;background:var(--orange)}
+    .strategy-guide{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));align-items:stretch;gap:12px}
+    .guide-item{display:grid;grid-template-rows:auto minmax(64px,1fr) auto auto;min-height:218px;padding:18px;border:1px solid var(--line);border-radius:8px;background:var(--bg-soft)}
+    .guide-heading{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+    .guide-rank{display:grid;flex:0 0 26px;width:26px;height:26px;place-items:center;border-radius:5px;color:#fff;background:var(--accent);font:600 12px var(--mono)}
+    .guide-item h3{margin:0;color:var(--ink);font-size:15px;font-weight:500}
+    .guide-item p{margin:0;font-size:13px;line-height:1.6}
+    .guide-result{display:flex;flex-wrap:wrap;align-items:flex-end;gap:7px 14px;margin-top:12px;padding-top:12px;border-top:1px solid var(--line);color:var(--muted);font-size:12px}
+    .guide-result strong{color:var(--ink);font-weight:600}
+    .guide-settings{min-height:40px;margin-top:8px;color:var(--muted);font:12px/1.5 var(--mono)}
+    .settings-box{margin-top:12px;padding:12px 14px;border:1px solid var(--line);border-radius:6px;background:var(--bg-soft)}
+    .settings-box span{display:block;margin-bottom:5px;color:var(--muted);font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase}
+    .settings-box code{color:var(--ink);font:12px/1.5 var(--mono);white-space:normal;word-break:break-word}
+    .cta-card{display:flex;align-items:center;justify-content:space-between;gap:28px;flex-wrap:wrap;padding:40px;border-radius:12px;background:var(--navy);color:var(--navy-text);box-shadow:var(--shadow);position:relative;overflow:hidden}
+    .cta-card h2{margin:0;color:#fff;font-weight:300;font-size:clamp(28px,3.2vw,38px);letter-spacing:-.02em;line-height:1.15}
+    .cta-card h2 span{color:#a5b4fc}
+    .cta-card p{margin:10px 0 0;color:var(--navy-muted);max-width:56ch}
+    .cta-card code{color:var(--amber);font:13px var(--mono)}
+    @media (max-width:1000px){.dash .controls{grid-template-columns:repeat(2,minmax(0,1fr))}.grid{grid-template-columns:1fr}.dash .metrics{grid-template-columns:repeat(2,1fr)}.dash .metric:nth-child(2n){border-right:0}.dash .metrics:not(.detail-metrics) .metric:nth-child(-n+2){border-bottom:1px solid var(--line)}.cashflow-card,.strategy-details-card{grid-column:1;grid-row:auto;align-self:stretch}.dash .detail-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}}
+    @media (max-width:700px){.strategy-guide{grid-template-columns:1fr}.workspace-nav{display:flex;flex-wrap:wrap}.workspace-nav button,.workspace-nav a{flex:1;padding:8px 10px;font-size:13px}.cta-card{padding:28px 22px}}
+    @media (max-width:560px){.dash .controls{grid-template-columns:1fr;padding:16px}.calculation-state{grid-template-columns:auto 1fr}.calculation-elapsed{grid-column:2}.dash .metric{min-height:96px;padding:14px}.card{padding:16px}.rank-row{grid-template-columns:20px 1fr auto}.bar-track{display:none}}
   </style>
 </head>
 <body>
-<main>
-  <header>
-    <div>
-      <div class="eyebrow">Jakob Grene · quantitative energy trading research</div>
-      <h1>Day-Ahead Power Trading Project</h1>
-      <p class="lede" id="pageLede">Compare forecast-driven battery strategies across the saved 15-minute test predictions. Training stays offline; results include battery losses and editable DK1 market and grid fees.</p>
-    </div>
-    <a class="api-link" href="/api/docs">API docs</a>
-  </header>
+<a class="skip-link" href="#benchmarks">Skip to benchmarks</a>
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="/"><span class="brand-mark" aria-hidden="true">g</span><span class="brand-name">Jakob Grene</span> <small>Power research</small></a>
+    <nav class="site-nav" aria-label="Site">
+      <a href="#model">How it works</a>
+      <a href="#benchmarks">Benchmarks</a>
+      <a href="/strategy-lab.html">Strategy Lab</a>
+    </nav>
+    <div class="header-actions"><a class="btn btn-ghost" href="/api/docs">API reference</a><a class="btn btn-primary" href="/strategy-lab.html">Open Strategy Lab <span class="chev" aria-hidden="true">&#8250;</span></a></div>
+  </div>
+</header>
 
+<main>
+  <section class="hero" aria-labelledby="hero-title">
+    <div class="hero-guides" aria-hidden="true"></div>
+    <div class="ribbon" aria-hidden="true"></div>
+    <div class="wrap">
+      <div class="hero-copy">
+        <span class="eyebrow">Jakob Grene &#183; <b>Quantitative energy trading research</b></span>
+        <h1 class="display" id="hero-title">Day-ahead power, from forecast to bid. <span class="soft">A transfer-learning model that turns DK1 market data into 15-minute price forecasts, trading signals and decisions you can replay.</span></h1>
+        <div class="hero-actions"><a class="btn btn-primary" href="/strategy-lab.html">Open Strategy Lab <span class="chev" aria-hidden="true">&#8250;</span></a><a class="btn btn-outline" href="#model">See how the model works</a></div>
+      </div>
+      <div class="hero-visual">
+        <figure class="product-card" style="margin:0" aria-label="The model: an hourly baseline plus a learned 15-minute residual">
+          <span class="card-kicker">TRANSFER LEARNING</span>
+          <h3>A familiar market.<br>A finer resolution.</h3>
+          <div class="equation"><span>Hourly<b>baseline</b></span><i aria-hidden="true">+</i><span>15-minute<b>residual</b></span></div>
+          <svg viewBox="0 0 360 110" fill="none" aria-hidden="true">
+            <path d="M0 26H360M0 55H360M0 84H360" stroke="#eef1f6"/>
+            <path d="M0 78H45V70H90V58H135V50H180V44H225V52H270V36H315V30H360" stroke="#0a2540" stroke-width="1.6" stroke-dasharray="5 5"/>
+            <path d="M0 82L11 76L22 79L34 72L45 74L56 66L68 71L79 63L90 61L101 55L113 59L124 47L135 52L146 45L158 49L169 40L180 46L191 41L203 47L214 39L225 50L236 54L248 47L259 56L270 40L281 33L293 38L304 27L315 33L326 25L338 31L349 22L360 28" stroke="#533afd" stroke-width="2.4" stroke-linejoin="round"/>
+          </svg>
+          <div class="caption"><span class="legend-line" style="color:#533afd">15-minute forecast</span><span class="legend-line dashed" style="color:#0a2540">Hourly baseline</span></div>
+          <div class="decision-chip"><span class="live-dot" aria-hidden="true"></span><span><small>YOUR STRATEGY</small>Signal &#8594; position &#8594; outcome</span></div>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <section class="band" aria-labelledby="band-title">
+    <div class="wrap">
+      <h2 id="band-title">Tested out of sample, one 15-minute interval at a time.</h2>
+      <div class="band-stats">
+        <div><strong id="statIntervals">&#8212;</strong><span>saved 15-minute prediction intervals</span></div>
+        <div><strong id="statMae">&#8212;</strong><span id="statMaeLabel">forecast MAE &#183; EUR/MWh</span></div>
+        <div><strong id="statStrategies">&#8212;</strong><span>strategies on the same forecast</span></div>
+        <div><strong id="statDays">&#8212;</strong><span id="statDaysLabel">unseen DK1 test days</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="model" aria-labelledby="model-title">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="kicker">01 / How it works</span>
+        <div><h2 class="display" id="model-title">From raw data to a bid. <span class="soft">Five steps turn market observations into a forecast, the forecast into a signal, and the signal into a position you can replay.</span></h2></div>
+      </div>
+      <div class="steps" role="tablist" aria-label="Model stages">
+        <button type="button" role="tab" id="tab-data" aria-selected="true" aria-controls="stage-data"><span class="num">01</span><span class="arrow" aria-hidden="true">&#8594;</span><b>Raw data</b><small>Observe the physical market.</small></button>
+        <button type="button" role="tab" id="tab-features" aria-selected="false" aria-controls="stage-features" tabindex="-1"><span class="num">02</span><span class="arrow" aria-hidden="true">&#8594;</span><b>Features</b><small>Align only what was known.</small></button>
+        <button type="button" role="tab" id="tab-forecast" aria-selected="false" aria-controls="stage-forecast" tabindex="-1"><span class="num">03</span><span class="arrow" aria-hidden="true">&#8594;</span><b>Forecast</b><small>Learn the 15-minute correction.</small></button>
+        <button type="button" role="tab" id="tab-signal" aria-selected="false" aria-controls="stage-signal" tabindex="-1"><span class="num">04</span><span class="arrow" aria-hidden="true">&#8594;</span><b>Signal</b><small>Express an idea as a rule.</small></button>
+        <button type="button" role="tab" id="tab-bidding" aria-selected="false" aria-controls="stage-bidding" tabindex="-1"><span class="num">05</span><span class="arrow" aria-hidden="true">&#8599;</span><b>Bidding &amp; replay</b><small>Size it, cost it, test it.</small></button>
+      </div>
+
+      <div class="step-view" id="stage-data" role="tabpanel" aria-labelledby="tab-data">
+        <span class="kicker">Selected view</span>
+        <div><h3>Start with the physical market.</h3><p>Historical DK1 day-ahead prices meet wind, solar and demand forecasts, weather, gas prices and system-balance history. Prices are the training target; forecasts and lagged observations are the inputs.</p><code>prices + fundamentals + timestamps</code></div>
+        <figure class="step-art" style="margin:0"><svg viewBox="0 0 340 170" fill="none" aria-hidden="true" font-family="ui-monospace,Consolas,monospace" font-size="9" fill-opacity="1">
+          <g fill="#5f6f86"><text x="0" y="22">WIND</text><text x="0" y="62">SOLAR</text><text x="0" y="102">DEMAND</text><text x="0" y="142">PRICE</text></g>
+          <path d="M60 30L80 18L100 24L120 10L140 16L160 28L180 20L200 12L220 22L240 30L260 18L280 14L300 24L320 16L340 20" stroke="#0891b2" stroke-width="1.8"/>
+          <path d="M60 68L120 68L140 60L160 52L180 50L200 56L220 66L240 68L340 68" stroke="#f5a524" stroke-width="1.8"/>
+          <path d="M60 108L80 102L100 96L120 98L140 92L160 94L180 100L200 104L220 96L240 90L260 92L280 98L300 104L320 100L340 96" stroke="#0a2540" stroke-width="1.8"/>
+          <path d="M60 142L80 136L100 140L120 128L140 132L160 146L180 138L200 126L220 134L240 144L260 130L280 124L300 136L320 128L340 132" stroke="#533afd" stroke-width="2.2"/>
+          <path d="M60 0V160" stroke="#e3e8ee"/>
+        </svg><figcaption>Every series is stored on one UTC clock before anything is learned.</figcaption></figure>
+      </div>
+
+      <div class="step-view" id="stage-features" role="tabpanel" aria-labelledby="tab-features" hidden>
+        <span class="kicker">Selected view</span>
+        <div><h3>Make every interval comparable.</h3><p>Align the data in UTC, check coverage, and build calendar and lagged features. At 15-minute resolution, lags of 96, 192 and 672 are one, two and seven days. Each row uses only information available before the decision.</p><code>raw observations &#8594; aligned feature matrix</code></div>
+        <figure class="step-art" style="margin:0"><svg viewBox="0 0 340 170" fill="none" aria-hidden="true" font-family="ui-monospace,Consolas,monospace" font-size="9">
+          <g fill="#5f6f86"><text x="70" y="14">t</text><text x="122" y="14">lag 96</text><text x="188" y="14">lag 192</text><text x="258" y="14">lag 672</text><text x="0" y="40">wind</text><text x="0" y="72">temp</text><text x="0" y="104">gas</text><text x="0" y="136">hour</text></g>
+          <g stroke="#e3e8ee" fill="#f6f9fc"><rect x="56" y="24" width="56" height="26" rx="3"/><rect x="120" y="24" width="60" height="26" rx="3"/><rect x="188" y="24" width="60" height="26" rx="3"/><rect x="256" y="24" width="60" height="26" rx="3"/><rect x="56" y="56" width="56" height="26" rx="3"/><rect x="188" y="56" width="60" height="26" rx="3"/><rect x="256" y="56" width="60" height="26" rx="3"/><rect x="56" y="88" width="56" height="26" rx="3"/><rect x="188" y="88" width="60" height="26" rx="3"/><rect x="256" y="88" width="60" height="26" rx="3"/><rect x="56" y="120" width="56" height="26" rx="3"/><rect x="120" y="120" width="60" height="26" rx="3"/><rect x="188" y="120" width="60" height="26" rx="3"/><rect x="256" y="120" width="60" height="26" rx="3"/></g>
+          <g stroke="#533afd" fill="#f1efff"><rect x="120" y="56" width="60" height="26" rx="3"/><rect x="120" y="88" width="60" height="26" rx="3"/></g>
+          <path d="M56 158H316" stroke="#cf2e5b" stroke-dasharray="3 3"/><text x="56" y="168" fill="#cf2e5b">nothing from after the decision enters a row</text>
+        </svg><figcaption>Highlighted: day-old weather and gas, known before the auction.</figcaption></figure>
+      </div>
+
+      <div class="step-view" id="stage-forecast" role="tabpanel" aria-labelledby="tab-forecast" hidden>
+        <span class="kicker">Selected view</span>
+        <div><h3>Transfer knowledge from hours to quarters.</h3><p>An ensemble trained on years of hourly data gives each quarter-hour an hourly baseline. A residual ensemble learns the 15-minute correction on top. A direct 15-minute model is kept as a benchmark, and every evaluation uses chronological splits.</p><code>15-minute forecast = hourly baseline + residual</code></div>
+        <figure class="step-art" style="margin:0"><svg viewBox="0 0 340 170" fill="none" aria-hidden="true">
+          <path d="M0 40H340M0 85H340M0 130H340" stroke="#eef1f6"/>
+          <path d="M0 120H56V108H112V88H168V76H224V92H280V62H340" stroke="#0a2540" stroke-width="1.6" stroke-dasharray="5 5"/>
+          <g fill="#533afd" fill-opacity=".14"><rect x="14" y="112" width="10" height="8"/><rect x="42" y="120" width="10" height="6"/><rect x="70" y="100" width="10" height="8"/><rect x="98" y="108" width="10" height="7"/><rect x="126" y="80" width="10" height="8"/><rect x="154" y="88" width="10" height="9"/><rect x="182" y="68" width="10" height="8"/><rect x="210" y="76" width="10" height="10"/><rect x="238" y="92" width="10" height="9"/><rect x="266" y="92" width="10" height="7"/><rect x="294" y="52" width="10" height="10"/><rect x="322" y="62" width="10" height="8"/></g>
+          <path d="M0 124L19 112L33 118L47 126L61 114L75 100L89 104L103 115L117 96L131 80L145 84L159 97L173 82L187 68L201 72L215 86L229 94L243 101L257 98L271 92L285 70L299 52L313 58L327 70L340 64" stroke="#533afd" stroke-width="2.4" stroke-linejoin="round"/>
+        </svg><figcaption>Dashed: hourly baseline. Solid: 15-minute forecast. Shaded: the learned residual.</figcaption></figure>
+      </div>
+
+      <div class="step-view" id="stage-signal" role="tabpanel" aria-labelledby="tab-signal" hidden>
+        <span class="kicker">Selected view</span>
+        <div><h3>A forecast becomes a rule you can test.</h3><p>Use the price forecast, its spread to the hourly baseline, or your own formula. Residual demand combines demand, wind and solar forecasts. Thresholds turn the signal into long, short or flat.</p><code>signal = demand - wind - solar</code></div>
+        <figure class="step-art" style="margin:0"><svg viewBox="0 0 340 170" fill="none" aria-hidden="true" font-family="ui-monospace,Consolas,monospace" font-size="9">
+          <rect x="96" y="10" width="64" height="150" fill="#0b8a5e" fill-opacity=".08"/><rect x="232" y="10" width="56" height="150" fill="#cf2e5b" fill-opacity=".08"/>
+          <path d="M0 48H340M0 122H340" stroke="#8193bf" stroke-dasharray="4 4"/>
+          <text x="2" y="42" fill="#5f6f86">+500 long</text><text x="2" y="136" fill="#5f6f86">&#8722;500 short</text>
+          <path d="M0 96L20 86L40 92L60 74L80 62L100 44L120 36L140 30L160 46L180 70L200 92L220 110L240 128L260 136L280 130L300 112L320 96L340 84" stroke="#f5a524" stroke-width="2.4" stroke-linejoin="round"/>
+        </svg><figcaption>Green: signal above the long threshold. Red: below the short threshold.</figcaption></figure>
+      </div>
+
+      <div class="step-view" id="stage-bidding" role="tabpanel" aria-labelledby="tab-bidding" hidden>
+        <span class="kicker">Selected view</span>
+        <div><h3>Size the position. Account for the outcome.</h3><p>Thresholds request a position; size, costs and loss limits shape the modeled execution. The Prop proxy settles on the next observed day-ahead move and closes any open position at the daily imbalance price. The lab simulates decisions &#8212; it never submits exchange bids.</p><code>signal &#8594; requested position &#8594; costs &amp; settlement</code><p style="margin-top:18px"><a class="btn btn-primary" href="/strategy-lab.html">Try it in the Strategy Lab <span class="chev" aria-hidden="true">&#8250;</span></a></p></div>
+        <figure class="step-art" style="margin:0"><svg viewBox="0 0 340 170" fill="none" aria-hidden="true">
+          <path d="M0 110H340" stroke="#e3e8ee"/>
+          <g fill="#0b8a5e" fill-opacity=".75"><rect x="96" y="92" width="14" height="18" rx="2"/><rect x="114" y="92" width="14" height="18" rx="2"/><rect x="132" y="92" width="14" height="18" rx="2"/><rect x="150" y="92" width="14" height="18" rx="2"/></g>
+          <g fill="#cf2e5b" fill-opacity=".75"><rect x="232" y="110" width="14" height="18" rx="2"/><rect x="250" y="110" width="14" height="18" rx="2"/><rect x="268" y="110" width="14" height="18" rx="2"/></g>
+          <path d="M0 70L96 70L112 64L128 60L146 52L164 48L232 48L248 40L266 42L284 34L340 34" stroke="#533afd" stroke-width="2.4" stroke-linejoin="round"/>
+          <text x="2" y="62" fill="#5f6f86" font-family="ui-monospace,Consolas,monospace" font-size="9">cumulative P&amp;L after costs</text>
+          <text x="96" y="150" fill="#0b8a5e" font-family="ui-monospace,Consolas,monospace" font-size="9">long</text><text x="232" y="150" fill="#cf2e5b" font-family="ui-monospace,Consolas,monospace" font-size="9">short</text>
+        </svg><figcaption>Positions only change the P&amp;L line when they are held.</figcaption></figure>
+      </div>
+    </div>
+  </section>
+
+  <section class="section soft" id="benchmarks" aria-labelledby="bench-title">
+    <div class="wrap dash">
+      <div class="section-head">
+        <span class="kicker">02 / Benchmarks</span>
+        <div><h2 class="display" id="bench-title">Every strategy, the same forecast. <span class="soft" id="pageLede">Compare forecast-driven battery strategies across the saved 15-minute test predictions.</span></h2></div>
+      </div>
+  <nav class="workspace-nav" aria-label="Workspace"><button type="button" class="active" data-trading-setup="battery" aria-pressed="true">Physical battery</button><button type="button" data-trading-setup="prop" aria-pressed="false">Prop proxy</button><a href="/strategy-lab.html">Strategy Lab</a></nav>
   <section class="controls" aria-label="Analysis controls">
-    <div class="setup-control"><label>Trading setup</label><div class="segmented" role="group" aria-label="Trading setup"><button type="button" class="active" data-trading-setup="battery" aria-pressed="true">Physical battery</button><button type="button" data-trading-setup="prop" aria-pressed="false">Prop proxy</button></div></div>
+
     <div><label for="forecast">Prediction series</label><select id="forecast"><option value="Prediction">Transfer residual ensemble</option><option value="Hourly_Baseline">Hourly baseline</option><option value="Direct_15min_Prediction">Direct 15-minute ensemble</option></select></div>
     <div><label for="strategy">Strategy to inspect</label><select id="strategy" disabled><option value="">Loading strategies…</option></select></div>
     <div><label for="mode">Evaluation mode</label><select id="mode"><option value="optimized">Tune earlier → test 10 full days</option><option value="fixed">Fixed defaults</option></select></div>
@@ -152,14 +258,14 @@
     <div class="fee-control" data-setup-control="prop" hidden><label for="dailyLossLimit">Daily loss limit DKK</label><input id="dailyLossLimit" type="number" min="0" step="500" value="5000"></div>
     <button id="run">Compare strategies</button>
   </section>
-  <div class="cost-note" id="batteryNote"><strong>DK1 2026 distribution-connected assumption:</strong> charge fee = Energinet system 72 + network 43 + Nord Pool 0.41; discharge fee = Energinet feed-in 5 + production balance 5.30 + Nord Pool 0.41 DKK/MWh. Excludes local DSO tariffs, electricity tax, VAT, fixed/capacity charges, imbalance costs, and Nord Pool currency service. The no-fee potential reruns each strategy with all three modeled trading fees set to zero; efficiency and degradation still apply. Sources: <a href="https://energinet.dk/media/ikylsqle/energinets_tarifkatalog_2026.pdf" target="_blank" rel="noreferrer">Energinet</a> and <a href="https://www.nordpoolgroup.com/4a7ad8/globalassets/trading-and-services/nord-pool-fee-schedule-2026-nordic-and-baltic-market.pdf" target="_blank" rel="noreferrer">Nord Pool</a>.</div>
-  <div class="cost-note" id="propNote" hidden><strong>Daily Prop lifecycle:</strong> positions use the next observed day-ahead move as a synthetic pre-delivery close proxy. Any position still open at the final DK1 interval is automatically closed and settled at that interval's realized imbalance price, including the closing cost. Imbalance is settlement data only and never enters a strategy signal.</div>
+  <details class="help-details"><summary>Fees and assumptions</summary><div class="cost-note" id="batteryNote"><strong>DK1 2026 distribution-connected assumption:</strong> charge fee = Energinet system 72 + network 43 + Nord Pool 0.41; discharge fee = Energinet feed-in 5 + production balance 5.30 + Nord Pool 0.41 DKK/MWh. Excludes local DSO tariffs, electricity tax, VAT, fixed/capacity charges, imbalance costs, and Nord Pool currency service. The no-fee potential reruns each strategy with all three modeled trading fees set to zero; efficiency and degradation still apply. Sources: <a href="https://energinet.dk/media/ikylsqle/energinets_tarifkatalog_2026.pdf" target="_blank" rel="noreferrer">Energinet</a> and <a href="https://www.nordpoolgroup.com/4a7ad8/globalassets/trading-and-services/nord-pool-fee-schedule-2026-nordic-and-baltic-market.pdf" target="_blank" rel="noreferrer">Nord Pool</a>.</div></details>
+  <details class="help-details"><summary>Settlement assumptions</summary><div class="cost-note" id="propNote" hidden><strong>Daily Prop lifecycle:</strong> positions use the next observed day-ahead move as a synthetic pre-delivery close proxy. Any position still open at the final DK1 interval is automatically closed and settled at that interval's realized imbalance price, including the closing cost. Imbalance is settlement data only and never enters a strategy signal.</div></details>
   <div class="calculation-state" id="calculationState" role="status" aria-live="polite">
     <span class="calculation-spinner" aria-hidden="true"></span>
     <div><strong id="statusText">Loading saved results…</strong><small id="statusDetail">Reading the deployment snapshot. No optimization is running.</small></div>
     <span class="calculation-elapsed" id="calculationElapsed">Saved</span>
   </div>
-  <div class="optimization-note" id="optimizationNote">Preparing chronological train/test evaluation…</div>
+  <details class="help-details"><summary>Evaluation details</summary><div class="optimization-note" id="optimizationNote">Preparing chronological train/test evaluation…</div></details>
 
   <section class="metrics">
     <article class="metric"><span>Selected strategy</span><strong id="bestStrategy">—</strong><small id="bestStrategyNote">Default strategy settings</small></article>
@@ -225,14 +331,24 @@
       <div class="table-wrap"><table class="model-table"><thead><tr><th>Model</th><th>Type</th><th>Source</th><th class="num">Features</th><th class="num">MAE EUR</th><th class="num">RMSE EUR</th><th class="num">sMAPE</th><th class="num">R²</th><th class="num">Coverage</th></tr></thead><tbody id="modelRows"></tbody></table></div>
     </article>
   </section>
-  <footer id="sourceNote">Research tooling only — not financial advice or a production trading system.</footer>
-</main>
+    </div>
+  </section>
 
+  <section class="section" aria-labelledby="cta-title">
+    <div class="wrap">
+      <div class="cta-card">
+        <div><span class="kicker" style="color:#a5b4fc">03 / Strategy Lab</span><h2 id="cta-title" style="margin-top:10px">Finding signal <span>in complexity.</span></h2><p>Write a rule like <code>signal = demand - wind - solar</code>, then replay it against real DK1 prices one 15-minute interval at a time.</p></div>
+        <a class="btn btn-primary" href="/strategy-lab.html">Open Strategy Lab <span class="chev" aria-hidden="true">&#8250;</span></a>
+      </div>
+    </div>
+  </section>
+</main>
+<footer class="site-footer"><div class="wrap"><span id="sourceNote">Research tooling only &#8212; not financial advice or a production trading system.</span><span><a href="#model">How it works</a> &#183; <a href="/strategy-lab.html">Strategy Lab</a> &#183; <a href="/api/docs">API</a></span></div></footer>
 <script>
 const $ = selector => document.querySelector(selector);
-const state = { results:null, comparison:null, tradingSetup:'battery', dirty:false, savedComparisons:new Map(), requestCache:new Map() };
+const state = { results:null, comparison:null, tradingSetup:new URLSearchParams(location.search).get('setup')==='prop'?'prop':'battery', dirty:false, savedComparisons:new Map(), requestCache:new Map() };
 const dkk = new Intl.NumberFormat('en-DK',{maximumFractionDigits:0});
-const colors = { actual:'#61adff', forecast:'#3fe09d', imbalance:'#ffb55f', charge:'#f6d365', discharge:'#e879f9', grid:'#213955', muted:'#8ea5bf', green:'#3fe09d', red:'#ff6b7a' };
+const colors = { actual:'#0a2540', forecast:'#533afd', imbalance:'#d97706', charge:'#f97316', discharge:'#0891b2', grid:'#e6ebf1', muted:'#5f6f86', green:'#0b8a5e', red:'#cf2e5b' };
 const modelNames = { Prediction:'Transfer residual ensemble', Hourly_Baseline:'Hourly baseline only', Direct_15min_Prediction:'Direct 15-min ensemble' };
 let calculationTimer=null;
 
@@ -293,7 +409,7 @@ function updateSetupUI(){
   document.querySelectorAll('[data-setup-control]').forEach(control=>{control.hidden=!control.dataset.setupControl.split(' ').includes(state.tradingSetup)});
   $('#batteryNote').hidden=state.tradingSetup!=='battery'; $('#propNote').hidden=!isProp(); $('#imbalanceChartCard').hidden=!isProp(); $('#forecastLegend').hidden=false;
   $('#priceChartTitle').textContent='DK1 day-ahead price vs prediction';
-  $('#pageLede').textContent=isProp()?'Compare forecast-driven long/short positions with a daily close deadline and realized DK1 imbalance fallback.':'Compare forecast-driven battery strategies using the original pre-settlement thesis calculation, including battery losses and editable market and grid fees.';
+  $('#pageLede').textContent=isProp()?'Compare long/short strategies with daily settlement.':'Compare battery strategies with editable fees and efficiency.';
   $('#rankingSubtitle').textContent=isProp()?'Same forecast, daily position lifecycle, costs, and realized settlement prices':'Same forecast, battery, and realized DKK prices';
   $('#buyLegend').textContent=isProp()?'Long':'Charge'; $('#sellLegend').textContent=isProp()?'Short':'Discharge';
   $('#strategyGuideIntro').textContent=isProp()?'Buy/charge signals become long positions and sell/discharge signals become short positions. Positions use the next realized DK1 day-ahead move until the daily deadline; anything still open then is settled at the realized imbalance price and forced flat.':'Charging means buying and storing electricity; discharging means selling it. Predictions choose the action, while realized DKK prices determine the displayed cashflow.';
@@ -322,7 +438,7 @@ function drawLineChart(canvas,rows,series){
     if(s.type==='markers'){
       rows.forEach((row,i)=>{
         if(row.Action!==s.action)return; const v=Number(row[s.key]); if(!Number.isFinite(v))return;
-        const xx=x(i),yy=y(v),size=s.size||5.5; ctx.save();ctx.fillStyle=s.color;ctx.strokeStyle='#06101d';ctx.lineWidth=1.5;ctx.beginPath();
+        const xx=x(i),yy=y(v),size=s.size||5.5; ctx.save();ctx.fillStyle=s.color;ctx.strokeStyle='#ffffff';ctx.lineWidth=1.5;ctx.beginPath();
         if(s.shape==='down'){ctx.moveTo(xx-size,yy-size);ctx.lineTo(xx+size,yy-size);ctx.lineTo(xx,yy+size)}else{ctx.moveTo(xx-size,yy+size);ctx.lineTo(xx+size,yy+size);ctx.lineTo(xx,yy-size)}
         ctx.closePath();ctx.fill();ctx.stroke();ctx.restore();
       });
@@ -421,9 +537,30 @@ function readyStatus(source='calculated'){
   setStatus(source==='saved'?'Saved results displayed':'Results ready','ok',`${comparison.selected_strategy} selected · ${comparison.evaluation.mode==='out_of_sample_optimization'?'out-of-sample optimized':'fixed defaults'} · ${setupStatus}.`);
 }
 
-function applyComparison(comparison,source='calculated'){
-  state.comparison=comparison; state.dirty=false; renderModelMetrics(); renderComparison(); renderPrice(); renderSourceNote(); readyStatus(source);
+function renderBand(){
+  const comparison=state.comparison,results=state.results; if(!comparison||!results)return;
+  const metric=metricForForecast(results.model_metrics,comparison.forecast_col)||metricForForecast(results.model_metrics,$('#forecast').value);
+  $('#statIntervals').textContent=fmt(results.dataset.rows,0);
+  $('#statMae').textContent=metric?fmt(metric.MAE,2):'—'; $('#statMaeLabel').textContent=metric?`MAE · EUR/MWh · ${metric.Model}`:'forecast MAE · EUR/MWh';
+  $('#statStrategies').textContent=fmt(comparison.strategies.length,0);
+  const optimized=comparison.evaluation.mode==='out_of_sample_optimization';
+  $('#statDays').textContent=fmt(comparison.evaluation.daily_observations,0); $('#statDaysLabel').textContent=optimized?'unseen DK1 test days':'DK1 days evaluated';
 }
+
+function applyComparison(comparison,source='calculated'){
+  state.comparison=comparison; state.dirty=false; renderModelMetrics(); renderComparison(); renderPrice(); renderSourceNote(); renderBand(); readyStatus(source);
+}
+
+// Model walkthrough tabs: click or arrow keys switch the selected view.
+const stageTabs=[...document.querySelectorAll('.steps [role=tab]')];
+function selectStage(tab,focus=false){
+  stageTabs.forEach(item=>{const active=item===tab;item.setAttribute('aria-selected',String(active));item.tabIndex=active?0:-1;document.getElementById(item.getAttribute('aria-controls')).hidden=!active});
+  if(focus)tab.focus();
+}
+stageTabs.forEach((tab,index)=>{
+  tab.addEventListener('click',()=>selectStage(tab));
+  tab.addEventListener('keydown',event=>{const step={ArrowRight:1,ArrowDown:1,ArrowLeft:-1,ArrowUp:-1}[event.key];if(!step)return;event.preventDefault();selectStage(stageTabs[(index+step+stageTabs.length)%stageTabs.length],true)});
+});
 
 function selectStrategy(name){
   const series=state.comparison?.strategy_series?.[name]; if(!series)return;

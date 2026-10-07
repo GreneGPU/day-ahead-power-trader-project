@@ -401,3 +401,40 @@ Suggested title:
 Suggested claim:
 
 > I converted an hourly electricity-price forecaster into a 15-minute forecasting and trading-research engine using transfer learning, residual correction, ensemble models, realistic validation, and a flexibility simulator.
+
+## Strategy Lab
+
+Open `/strategy-lab.html` from the dashboard to backtest your own threshold rules against the saved DK1 data. Choose a forecast price, forecast-minus-baseline spread, forecast change, or uploaded CSV signal. Set lower/upper thresholds and direction, then choose physical battery or the long/short Prop proxy. Prices, fees and cashflows in this lab use DKK.
+
+The CSV template contains the saved timestamps. Keep the `HourUTC,Signal` headers, supply timezone-aware timestamps and numeric signals, and cover every interval in the selected test period. Only use signals available at decision time. Files are sent to the backtest API for calculation; saving rules in your browser does not save the CSV.
+
+Results include cashflow, drawdown, fees, remaining battery energy or Prop equity, a cumulative chart, and an exportable interval log. Battery cashflow excludes the value of remaining energy. Prop results use the existing next-price proxy and daily imbalance settlement. Repeated tuning on the final ten days is exploratory research, not independent validation.
+
+The API accepts declarative rules through `POST /api/custom-strategy`; it does not execute uploaded code. See `/api/docs` for the request schema.
+
+### Formula signals
+
+Choose **Write a formula** in Strategy Lab. For example:
+
+```text
+signal = demand + outages - wind - solar
+```
+
+`wind` and `solar` use the saved DK1 day-ahead forecasts (MW). `forecast` is the selected price forecast and `baseline` the hourly price baseline (DKK/MWh). `demand` is an alias of the saved `load_fc` forecast (MW). Only `outages` requires a fundamentals CSV with `HourUTC,outages`; the downloadable template leaves missing inputs blank deliberately. Optional `wind` and `solar` columns replace saved inputs for the uploaded series. Every used input must cover the selected test period. Nothing is automatically normalized or filled with zero.
+
+Arithmetic supports +, -, *, /, parentheses and abs, sign, min, max, avg, clamp. Functions operate on values at the same timestamp; avg is not a moving average. Formulas use a bounded arithmetic parser, not Python or JavaScript execution. Configure upper/lower thresholds and direction to convert the signal into actions. Formulas are saved with browser rules; uploaded input files must be loaded again.
+
+
+### Saved thesis features
+
+The formula editor also accepts all 15 requested lagged features under their exact names: system balance; temperature, humidity, weather wind speed and gas price at lags 96/192/672; and the known-lag gas price daily change and seven-day mean. The expandable feature list inserts variable names into the editor. `load_fc` and its alias `demand` are available without uploads.
+
+`scripts/export_formula_features.py` aligns the source thesis CSV to the 2,116 deployment timestamps, parsing day-first UTC timestamps explicitly. It rejects duplicates, missing coverage and nonfinite values. The exported `deployment_data/formula_features.csv.gz` preserves supplied feature values and lags; its companion manifest records the source filename and SHA-256. No new shifts, interpolation, or normalization are applied. Source units are retained, so scale coefficients appropriately when mixing features.
+
+### Prop replay and current prices
+
+Strategy Lab now runs long/short Prop tests. After running a formula, use Play, Next interval, Restart, the timeline slider, or Show full test. Replay reveals completed intervals and their modeled price-move outcomes; the position shown is the one held during that interval, with the post-settlement position shown separately. Metrics and logs follow the replay cursor.
+
+Up to five runs with identical timestamps can be compared in one browser tab. Each run uses its own formula, thresholds, capital, position size and costs. These are independent full-period tests; switching the inspected run does not switch positions mid-test. A different test period clears the comparison. Strength is signed distance from the threshold midpoint divided by half the threshold gap, oriented toward long/short. +/-100% reaches an entry boundary; it is not a probability or a position-sizing rule.
+
+The separate Latest DK1 day-ahead prices panel reads Energinet DayAheadPrices for today and tomorrow, when published, with a ten-minute cache. These are published auction prices, not live intraday quotes. This panel does not generate live signals from the historical thesis features.

@@ -21,6 +21,8 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from intraday_power_quant.optimization import optimize_strategy_suite, simulate_strategy_from_settings
+from intraday_power_quant.custom_strategy import CustomStrategyRequest, prepare_custom_signals, run_custom_strategy
+from intraday_power_quant.latest_prices import latest_prices
 from intraday_power_quant.imbalance_trading import (
     simulate_imbalance_perfect_foresight,
     simulate_imbalance_spread_positions,
@@ -161,6 +163,11 @@ def _load_deployment_results() -> tuple[pd.DataFrame, list[dict[str, Any]], dict
     metrics = json.loads((data_dir / "model_metrics.json").read_text(encoding="utf-8"))
     manifest = json.loads((data_dir / "manifest.json").read_text(encoding="utf-8"))
     forecasts["HourUTC"] = pd.to_datetime(forecasts["HourUTC"], utc=True)
+    fundamentals = pd.read_csv(data_dir / "formula_features.csv.gz")
+    fundamentals["HourUTC"] = pd.to_datetime(fundamentals["HourUTC"], utc=True)
+    forecasts = forecasts.merge(fundamentals, on="HourUTC", how="left", validate="one_to_one")
+    if forecasts[fundamentals.columns.drop("HourUTC")].isna().any().any():
+        raise ValueError("Formula features do not cover every prediction timestamp.")
     imbalance = pd.read_csv(data_dir / "imbalance_prices.csv.gz", parse_dates=["HourUTC"])
     imbalance["HourUTC"] = pd.to_datetime(imbalance["HourUTC"], utc=True)
     forecasts = forecasts.merge(imbalance, on="HourUTC", how="left", validate="one_to_one")
@@ -322,6 +329,49 @@ def saved_comparison(trading_setup: str) -> dict[str, Any]:
         return _load_saved_comparison(normalized)
     except (FileNotFoundError, OSError, json.JSONDecodeError) as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@app.post("/api/custom-strategy")
+def custom_strategy(payload: CustomStrategyRequest) -> dict[str, Any]:
+    try:
+        history, _, _ = _load_deployment_results()
+        frame = prepare_custom_signals(history, payload)
+        if payload.evaluation == "last_10_days":
+            _, frame = _split_complete_day_holdout(frame, 10)
+        intervals, summary = run_custom_strategy(frame, payload)
+    except (ValueError, TypeError, KeyError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    columns = ["HourUTC", "Custom_Signal", "Signal_Action", "Action", "Actual_Price",
+               "Dispatch_MW", "State_Of_Charge_MWh", "Cashflow", "Cumulative_Cashflow"]
+    if payload.trading_setup == "prop":
+        columns += ["Position", "Position_MWh", "Position_After_Settlement", "Transaction_Cost",
+                    "Equity_DKK", "Settlement_Basis"]
+    # Saved model inputs aligned to each interval, for the Strategy Lab factor tiles.
+    factor_columns = {"wind": "Wind_Total_DayAhead_MW", "solar": "Solar_DayAhead_MW",
+                      "demand": "load_fc", "forecast": f"{payload.forecast_col}_DKK",
+                      "baseline": "Hourly_Baseline_DKK", "temperature": "temperature_lag_96",
+                      "gas": "gas_price_lag_96", "humidity": "humidity_lag_96"}
+    by_time = frame.set_index("HourUTC").reindex(intervals["HourUTC"])
+    factors = {name: by_time[column].tolist() for name, column in factor_columns.items() if column in by_time}
+    return _clean_json({
+        "name": payload.name, "trading_setup": payload.trading_setup,
+        "currency": "DKK", "summary": summary,
+        "period": {"start": frame["HourUTC"].min().isoformat(),
+                   "end": frame["HourUTC"].max().isoformat(), "rows": len(frame)},
+        "settings": payload.model_dump(exclude={"signal_records", "fundamental_records"}),
+        "intervals": _json_records(intervals[columns]),
+        "factors": factors,
+    })
+
+
+@app.get("/api/latest-dk1-prices")
+def get_latest_dk1_prices(response: Response):
+    try:
+        data = latest_prices()
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        raise HTTPException(status_code=502, detail="Energinet prices are temporarily unavailable. Try again later.") from exc
+    response.headers["Cache-Control"] = "public, max-age=60, s-maxage=600"
+    return data
 
 
 @app.post("/api/compare")
