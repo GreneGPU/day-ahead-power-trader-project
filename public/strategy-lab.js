@@ -276,7 +276,9 @@
       return;
     }
     const extent=values=>{const lo=Math.min(...values),hi=Math.max(...values),pad=Math.max((hi-lo)*.12,1);return [lo-pad,hi+pad];};
-    const [priceMin,priceMax]=extent(rows.map(row=>row.Actual_Price));
+    // The price forecast the strategy traded on, from the selected forecast model (known day-ahead).
+    const forecasts=(result.factors?.forecast||[]).slice(start,replayCursor);
+    const [priceMin,priceMax]=extent([...rows.map(row=>row.Actual_Price),...forecasts.filter(Number.isFinite)]);
     const signals=rows.map(row=>row.Custom_Signal).filter(Number.isFinite);
     const [signalMin,signalMax]=extent([...signals,result.settings.lower,result.settings.upper]);
     const x=i=>left+(rows.length===1?width/2:i/(rows.length-1)*width);
@@ -297,13 +299,15 @@
       ctx.setLineDash([4,5]);ctx.strokeStyle='#8193bf';ctx.beginPath();ctx.moveTo(left,signalY(threshold));ctx.lineTo(right,signalY(threshold));ctx.stroke();ctx.setLineDash([]);
       ctx.textAlign='right';ctx.fillText(format(threshold),left-9,signalY(threshold)+4);
     }
-    function line(key,y,color){ctx.strokeStyle=color;ctx.lineWidth=2;ctx.beginPath();let connected=false;rows.forEach((row,i)=>{if(!Number.isFinite(row[key])){connected=false;return;}if(connected)ctx.lineTo(x(i),y(row[key]));else ctx.moveTo(x(i),y(row[key]));connected=true;});ctx.stroke();}
-    line('Actual_Price',priceY,'#a5b4fc');line('Custom_Signal',signalY,'#f5b54a');
+    function line(values,y,color,dash=[],lineWidth=2){ctx.strokeStyle=color;ctx.lineWidth=lineWidth;ctx.setLineDash(dash);ctx.beginPath();let connected=false;values.forEach((value,i)=>{if(!Number.isFinite(value)){connected=false;return;}if(connected)ctx.lineTo(x(i),y(value));else ctx.moveTo(x(i),y(value));connected=true;});ctx.stroke();ctx.setLineDash([]);}
+    line(forecasts,priceY,'#e8ecf8',[5,4],1.6);line(rows.map(row=>row.Actual_Price),priceY,'#a5b4fc');line(rows.map(row=>row.Custom_Signal),signalY,'#f5b54a');
     const inspected=pointer==null?rows.length-1:Math.round(Math.max(0,Math.min(1,pointer))*(rows.length-1));
     const row=rows[inspected];ctx.setLineDash([3,4]);ctx.strokeStyle='#c9d2ee';ctx.beginPath();ctx.moveTo(x(inspected),top);ctx.lineTo(x(inspected),bottom);ctx.stroke();ctx.setLineDash([]);
+    const forecast=forecasts[inspected];
+    if(Number.isFinite(forecast)){ctx.fillStyle='#e8ecf8';ctx.beginPath();ctx.arc(x(inspected),priceY(forecast),3,0,Math.PI*2);ctx.fill();}
     ctx.fillStyle='#a5b4fc';ctx.beginPath();ctx.arc(x(inspected),priceY(row.Actual_Price),3,0,Math.PI*2);ctx.fill();
     ctx.fillStyle='#9aa8cc';ctx.textAlign='left';ctx.fillText(rows[0].HourUTC.slice(5,16).replace('T',' '),left,rect.height-6);ctx.textAlign='right';ctx.fillText(rows.at(-1).HourUTC.slice(5,16).replace('T',' ')+' UTC',right,rect.height-6);
-    el('signalChartStatus').textContent=`${row.HourUTC.slice(0,16).replace('T',' ')} UTC · price ${format(row.Actual_Price)} DKK/MWh · signal ${format(row.Custom_Signal)} · ${positionName(row.Position||0)} · last ${rows.length} completed intervals`;
+    el('signalChartStatus').textContent=`${row.HourUTC.slice(0,16).replace('T',' ')} UTC · price ${format(row.Actual_Price)} DKK/MWh${Number.isFinite(forecast)?` · forecast ${format(forecast)} (error ${format(row.Actual_Price-forecast)})`:''} · signal ${format(row.Custom_Signal)} · ${positionName(row.Position||0)} · last ${rows.length} completed intervals`;
   }
   function render() {
     const shown=result.intervals.slice(0,replayCursor);

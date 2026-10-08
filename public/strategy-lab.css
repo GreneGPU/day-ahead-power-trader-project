@@ -64,6 +64,7 @@
 .sl-legend span{display:inline-flex;align-items:center;gap:7px}
 .sl-legend span::before{content:"";width:14px;height:2px;background:currentColor}
 .lg-price::before{background:var(--p-price)!important}.lg-signal::before{background:var(--p-signal)!important}
+.lg-forecast::before{background:repeating-linear-gradient(90deg,#e8ecf8 0 4px,transparent 4px 7px)!important}
 .lg-threshold::before{background:repeating-linear-gradient(90deg,#8193bf 0 3px,transparent 3px 6px)!important}
 .lg-long::before,.lg-short::before{height:10px!important;width:10px!important;border-radius:2px}
 .lg-long::before{background:rgba(79,224,176,.35)!important}.lg-short::before{background:rgba(255,143,171,.35)!important}
