@@ -402,6 +402,26 @@ Suggested claim:
 
 > I converted an hourly electricity-price forecaster into a 15-minute forecasting and trading-research engine using transfer learning, residual correction, ensemble models, realistic validation, and a flexibility simulator.
 
+## Walk-forward forecast history
+
+The website's backtests run on **walk-forward out-of-sample forecasts** for 13 November 2025 to 4 March 2026 (10,744 quarter-hours in 8 blocks of 14 days), instead of a single 22-day test split. Before each block, the 15-minute residual and direct ensembles are retrained on all 15-minute data strictly earlier than the block (expanding window, first block after 35 days); the hourly source model is trained once on hourly data before 1 October 2025. No interval is predicted by a model that saw it.
+
+```powershell
+pip install -e ".[training]"
+python -m intraday_power_quant.cli walk-forward --data-dir data/raw --output-dir outputs/walk_forward
+python scripts/export_walk_forward.py
+python scripts/enrich_deployment_features.py
+python scripts/import_imbalance_prices.py --from-api
+python scripts/export_formula_features.py <thesis final_15min_day_ahead_safe_modeling_dataset.csv>
+python scripts/build_saved_comparisons.py
+```
+
+`data/raw` needs the thesis modeling datasets with ISO timestamps (the thesis CSVs are day-first, `dd-mm-yy HH:MM`). Energinet's `Forecasts_Hour` has no DK1 data for 22–24 November 2025; those 72 hours of day-ahead wind/solar features come from the modeling dataset's own forecasts and are flagged in `deployment_data/manifest.json`.
+
+Walk-forward accuracy (EUR/MWh): hourly baseline MAE 18.48, transfer residual ensemble 19.81, direct 15-minute ensemble 21.30, TL pure stacking 17.85. The transfer model is weaker than the baseline in the first blocks, when it has only 5–7 weeks of 15-minute training data, and better once more data is available; on the original thesis test window (10 February–4 March) it beats the baseline (17.04 vs 18.28). The champion column was fixed before this run and is not re-selected on these results.
+
+The Strategy Lab defaults to the final 30 complete days and can test the whole history; the benchmark dashboard defaults to the last 30 days (20 tuning + 10 test) so live re-optimization stays within the serverless time limit.
+
 ## Strategy Lab
 
 The Strategy Lab is on the landing page (`/#lab`; the old `/strategy-lab.html` redirects there), and the benchmark dashboard lives at `/benchmarks.html`. Press one of twelve ready-made strategies, such as long the day's cheapest 20% of forecast intervals and short the priciest 20% (optionally sized up in the extreme 5%), or backtest your own threshold rules against the saved DK1 data. Write a formula (including the per-delivery-day inputs `forecast_rank`, `forecast_z`, `forecast_spread` and `hour`), or choose a forecast price, forecast-minus-baseline spread, forecast change, or uploaded CSV signal. Set lower/upper thresholds and direction, optionally with dynamic sizing (step or scaled up to a maximum multiplier at outer thresholds), then choose physical battery or the long/short Prop proxy. Prices, fees and cashflows in this lab use DKK.

@@ -444,20 +444,20 @@
     const {periods,grid}=state.data, settings=result.settings;
     el('rbStatus').textContent=`${result.name} · thresholds ${format(settings.lower)} / ${format(settings.upper)}${settings.sizing&&settings.sizing!=='fixed'?` · ${settings.sizing} sizing`:''}`;
     const body=el('rbPeriods');body.replaceChildren();
-    for(const [key,name] of [['earlier','Earlier period'],['final_10_days','Final 10 days']]){
+    for(const key of ['earlier','test']){
       const period=periods[key],tr=document.createElement('tr'),label=document.createElement('td');
-      label.textContent=name;
+      label.textContent=period?.label||key;
       if(period&&!period.error){const small=document.createElement('small');small.textContent=` ${period.start.slice(5,10)} – ${period.end.slice(5,10)}`;small.className='rb-dates';label.append(small);}
       tr.append(label);
       const values=period?.error?[period.error,'','','','']:[period.days,format(period.total_cashflow),format(period.pnl_per_day),period.win_rate==null?'—':`${format(period.win_rate*100)}%`,format(period.max_drawdown)];
       values.forEach((value,i)=>{const td=document.createElement('td');td.textContent=value;if((i===1||i===2)&&!period?.error)td.className=period.total_cashflow>0?'positive':period.total_cashflow<0?'negative':'';if(period?.error&&i===0)td.colSpan=5;if(!(period?.error&&i>0))tr.append(td);});
       body.append(tr);
     }
-    const early=periods.earlier,late=periods.final_10_days;
+    const early=periods.earlier,late=periods.test,earlyName=early?.label?.toLowerCase(),lateName=late?.label?.toLowerCase();
     el('rbVerdict').textContent=early?.error||late?.error?'One period could not be evaluated with this rule.'
-      :late.pnl_per_day<=0?`Not profitable in the final 10 days (${format(late.pnl_per_day)} DKK/day); the earlier period made ${format(early.pnl_per_day)} DKK/day.`
-      :early.pnl_per_day<=0?`Loses money in the earlier period (${format(early.pnl_per_day)} DKK/day): the result on the final 10 days may be specific to those days.`
-      :`Profitable in both periods. The earlier ${early.days} days earned ${format(early.pnl_per_day)} DKK/day, ${Math.round(early.pnl_per_day/late.pnl_per_day*100)}% of the final period’s rate.`;
+      :late.pnl_per_day<=0?`Not profitable in the ${lateName} (${format(late.pnl_per_day)} DKK/day); the ${earlyName} made ${format(early.pnl_per_day)} DKK/day.`
+      :early.pnl_per_day<=0?`Loses money in the ${earlyName} (${format(early.pnl_per_day)} DKK/day): the result in the ${lateName} may be specific to that period.`
+      :`Profitable in both periods. The ${earlyName} (${early.days} days) earned ${format(early.pnl_per_day)} DKK/day, ${Math.round(early.pnl_per_day/late.pnl_per_day*100)}% of the rate in the ${lateName}.`;
     // Heatmap of P&L over nearby thresholds.
     const table=el('rbHeatmap');table.replaceChildren();
     const values=grid.pnl.flat().filter(v=>v!=null),maxAbs=Math.max(1,...values.map(Math.abs));

@@ -1,7 +1,7 @@
 {
   "source_file": "final_15min_day_ahead_safe_modeling_dataset.csv",
   "source_sha256": "d9c51b57c71bc72c590f00c333943ce844ce145bc0810c7d24057f571899f0b2",
-  "rows": 2116,
+  "rows": 10744,
   "columns": [
     "system_balance_MWh_known_lag96",
     "temperature_lag_96",

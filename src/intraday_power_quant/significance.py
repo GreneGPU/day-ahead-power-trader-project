@@ -75,11 +75,16 @@ def significance_tests(intervals: pd.DataFrame, permutations: int = 2000, seed: 
 
     rng = np.random.default_rng(seed)
     orders = _derangements(rng, days, permutations)
-    shuffled = np.einsum("pdi,di->p", exposure[orders], move)
     offsets = rng.integers(1, INTERVALS_PER_DAY, size=(permutations, days))
-    columns = (np.arange(INTERVALS_PER_DAY)[None, None, :] - offsets[:, :, None]) % INTERVALS_PER_DAY
-    shifted_exposure = np.take_along_axis(np.broadcast_to(exposure, (permutations, days, INTERVALS_PER_DAY)), columns, axis=2)
-    shifted = np.einsum("pdi,di->p", shifted_exposure, move)
+    # Batches keep memory bounded (batch x days x 96 values) when the test period is months long.
+    batch = max(1, 200_000 // (days * INTERVALS_PER_DAY))
+    shuffled, shifted = np.empty(permutations), np.empty(permutations)
+    for lo in range(0, permutations, batch):
+        hi = min(permutations, lo + batch)
+        shuffled[lo:hi] = np.einsum("pdi,di->p", exposure[orders[lo:hi]], move)
+        columns = (np.arange(INTERVALS_PER_DAY)[None, None, :] - offsets[lo:hi, :, None]) % INTERVALS_PER_DAY
+        rolled = np.take_along_axis(np.broadcast_to(exposure, (hi - lo, days, INTERVALS_PER_DAY)), columns, axis=2)
+        shifted[lo:hi] = np.einsum("pdi,di->p", rolled, move)
 
     def permutation_p(null: np.ndarray) -> float:
         return float((1 + (null >= actual_gross).sum()) / (1 + len(null)))

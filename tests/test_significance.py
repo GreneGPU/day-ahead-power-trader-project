@@ -53,9 +53,13 @@ def test_robustness_reports_significance_for_the_test_period():
                'lower': 20, 'upper': 80, 'trading_setup': 'prop'}
     significance = client.post('/api/custom-strategy/robustness', json=payload).json()['significance']
     assert significance['days'] == 10
-    # Matches the offline analysis: mean 4,319 DKK/day, sd 10,630, one-sided daily p of about 0.115.
-    assert significance['mean_daily'] == pytest.approx(4318.68, abs=1)
-    assert significance['p_daily'] == pytest.approx(0.115, abs=0.005)
+    # The daily statistics are those of the backtest itself.
+    rows = pd.DataFrame(client.post('/api/custom-strategy', json=payload).json()['intervals'])
+    daily = rows.groupby(pd.to_datetime(rows['HourUTC'], utc=True).dt.tz_convert('Europe/Copenhagen').dt.date)['Cashflow'].sum()
+    assert significance['mean_daily'] == pytest.approx(daily.mean())
+    assert significance['sd_daily'] == pytest.approx(daily.std(ddof=1))
+    t = daily.mean() / (daily.std(ddof=1) / np.sqrt(len(daily)))
+    assert significance['t_stat'] == pytest.approx(t) and 0 < significance['p_daily'] < 1
     # Most of the edge is the typical daily price shape, so shuffling days keeps most of the P&L.
     assert 0.15 < significance['day_shuffle']['p'] < 0.6
     assert significance['day_shuffle']['null_mean'] > 0.5 * significance['actual_gross']

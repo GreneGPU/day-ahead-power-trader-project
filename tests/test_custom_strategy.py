@@ -289,11 +289,27 @@ def test_robustness_matches_backtest_and_covers_earlier_period(extra):
     assert grid['lowers'][2] == 20 and grid['uppers'][2] == 80 and len(grid['pnl']) == 5
     # The centre of the sensitivity grid and the final-10-day period are the backtest itself.
     assert grid['pnl'][2][2] == pytest.approx(backtest['summary']['total_cashflow'])
-    final = data['periods']['final_10_days']
+    final = data['periods']['test']
+    assert final['label'] == 'Final 10 days' and data['periods']['earlier']['label'] == 'Earlier period'
     assert final['total_cashflow'] == pytest.approx(backtest['summary']['total_cashflow']) and final['days'] == 10
     earlier = data['periods']['earlier']
     assert earlier['days'] >= 5 and earlier['end'] < final['start']
     assert 0 <= earlier['win_rate'] <= 1
+
+
+def test_thirty_day_and_full_evaluation_periods():
+    base = {'signal': 'formula', 'formula': 'signal = forecast_rank', 'direction': 'buy_low',
+            'lower': 20, 'upper': 80, 'trading_setup': 'prop'}
+    thirty = client.post('/api/custom-strategy', json={**base, 'evaluation': 'last_30_days'}).json()
+    assert len(thirty['intervals']) == 30 * 96  # 3 Feb - 4 Mar 2026 has no daylight-saving change
+    robust = client.post('/api/custom-strategy/robustness', json={**base, 'evaluation': 'last_30_days'}).json()
+    assert robust['periods']['test']['label'] == 'Final 30 days' and robust['periods']['test']['days'] == 30
+    assert robust['periods']['test']['total_cashflow'] == pytest.approx(thirty['summary']['total_cashflow'])
+    assert robust['significance']['days'] == 30
+    full = client.post('/api/custom-strategy/robustness', json={**base, 'evaluation': 'full'}).json()
+    first, second = full['periods']['earlier'], full['periods']['test']
+    assert (first['label'], second['label']) == ('First half', 'Second half') and first['end'] < second['start']
+    assert full['significance']['days'] >= 60
 
 
 def test_robustness_grid_skips_crossed_thresholds():

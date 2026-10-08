@@ -78,7 +78,7 @@ class CustomStrategyRequest(StrictModel):
     upper: float = Field(default=20, ge=-1e6, le=1e6)
     direction: Literal["buy_low", "buy_high"] = "buy_low"
     lookback: int = Field(default=4, ge=1, le=672)
-    evaluation: Literal["full", "last_10_days"] = "last_10_days"
+    evaluation: Literal["full", "last_10_days", "last_30_days"] = "last_10_days"
     battery: CustomBattery = Field(default_factory=CustomBattery)
     prop: CustomProp = Field(default_factory=CustomProp)
     signal_records: list[SignalRecord] | None = Field(default=None, max_length=20000)

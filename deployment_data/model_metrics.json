@@ -2,47 +2,47 @@
   {
     "Model": "Hourly baseline only",
     "Model_Type": "Hourly source baseline",
-    "Metric_Source": "Project holdout",
+    "Metric_Source": "Walk-forward out-of-sample",
     "Number_Features": 1,
-    "Test_Start": "2026-02-10T22:00:00Z",
+    "Test_Start": "2025-11-13T00:00:00Z",
     "Test_End": "2026-03-04T22:45:00Z",
-    "Test_Rows": 2116,
-    "Test_Coverage_Pct": 100,
-    "MAE": 18.16009494387544,
-    "RMSE": 24.49903410373304,
-    "sMAPE": 20.48375773568997,
-    "R2": 0.4987772817632379
+    "Test_Rows": 10744,
+    "Test_Coverage_Pct": 99.96278377372532,
+    "MAE": 18.47888761328501,
+    "RMSE": 26.668053256353517,
+    "sMAPE": 21.78906473433565,
+    "R2": 0.5301671600612232
   },
   {
     "Model": "Direct 15-min ensemble",
     "Model_Type": "15-min scratch",
-    "Metric_Source": "Project holdout",
+    "Metric_Source": "Walk-forward out-of-sample",
     "Number_Features": 75,
-    "Test_Start": "2026-02-10T22:00:00Z",
+    "Test_Start": "2025-11-13T00:00:00Z",
     "Test_End": "2026-03-04T22:45:00Z",
-    "Test_Rows": 2116,
-    "Test_Coverage_Pct": 100,
-    "MAE": 20.65671671008088,
-    "RMSE": 28.4809314626142,
-    "sMAPE": 22.4505989302302,
-    "R2": 0.3226062265345055
+    "Test_Rows": 10744,
+    "Test_Coverage_Pct": 99.96278377372532,
+    "MAE": 21.29930412297377,
+    "RMSE": 31.310456234034515,
+    "sMAPE": 23.462337477172063,
+    "R2": 0.3523512469098564
   },
   {
     "Model": "Transfer residual ensemble",
     "Model_Type": "Transfer learning",
-    "Metric_Source": "Project holdout",
+    "Metric_Source": "Walk-forward out-of-sample",
     "Number_Features": 76,
-    "Test_Start": "2026-02-10T22:00:00Z",
+    "Test_Start": "2025-11-13T00:00:00Z",
     "Test_End": "2026-03-04T22:45:00Z",
-    "Test_Rows": 2116,
-    "Test_Coverage_Pct": 100,
-    "MAE": 18.54080901762362,
-    "RMSE": 24.95936894278714,
-    "sMAPE": 20.57133539975063,
-    "R2": 0.4797644521272072
+    "Test_Rows": 10744,
+    "Test_Coverage_Pct": 99.96278377372532,
+    "MAE": 19.81379551874105,
+    "RMSE": 28.737721282987955,
+    "sMAPE": 21.85922452689862,
+    "R2": 0.4544112599285917
   },
   {
-    "Model": "SARIMAX — Direct 15-minute EPF",
+    "Model": "SARIMAX \u2014 Direct 15-minute EPF",
     "Model_Type": "Direct 15-minute EPF benchmark",
     "Metric_Source": "Provided model comparison",
     "Number_Features": 75,
@@ -52,7 +52,7 @@
     "R2": 0.37
   },
   {
-    "Model": "SARIMAX — TL 15-minute EPF",
+    "Model": "SARIMAX \u2014 TL 15-minute EPF",
     "Model_Type": "Transfer-learning benchmark",
     "Metric_Source": "Provided model comparison",
     "Number_Features": 76,
@@ -66,17 +66,17 @@
     "R2_Improvement": 0.07
   },
   {
-    "Model": "LSTM — Direct 15-minute EPF",
+    "Model": "LSTM \u2014 Direct 15-minute EPF",
     "Model_Type": "Direct 15-minute EPF benchmark",
     "Metric_Source": "Provided model comparison",
     "Number_Features": 75,
     "MAE": 22.06,
     "RMSE": 31.29,
     "sMAPE": 24.34,
-    "R2": 0.20
+    "R2": 0.2
   },
   {
-    "Model": "LSTM — TL 15-minute EPF",
+    "Model": "LSTM \u2014 TL 15-minute EPF",
     "Model_Type": "Transfer-learning benchmark",
     "Metric_Source": "Provided model comparison",
     "Number_Features": 76,
@@ -90,27 +90,27 @@
     "R2_Improvement": -0.14
   },
   {
-    "Model": "CNN-LSTM — Direct 15-minute EPF",
+    "Model": "CNN-LSTM \u2014 Direct 15-minute EPF",
     "Model_Type": "Direct 15-minute EPF benchmark",
     "Metric_Source": "Provided model comparison",
     "Number_Features": 75,
     "MAE": 19.87,
     "RMSE": 31.42,
     "sMAPE": 22.84,
-    "R2": 0.20
+    "R2": 0.2
   },
   {
-    "Model": "CNN-LSTM — TL 15-minute EPF",
+    "Model": "CNN-LSTM \u2014 TL 15-minute EPF",
     "Model_Type": "Transfer-learning benchmark",
     "Metric_Source": "Provided model comparison",
     "Number_Features": 76,
     "MAE": 19.29,
     "RMSE": 29.33,
     "sMAPE": 21.94,
-    "R2": 0.30,
+    "R2": 0.3,
     "MAE_Improvement_Pct": 2.92,
     "RMSE_Improvement_Pct": 6.65,
     "sMAPE_Improvement_Pct": 3.94,
-    "R2_Improvement": 0.10
+    "R2_Improvement": 0.1
   }
 ]

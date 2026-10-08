@@ -193,6 +193,9 @@ def _select_window(frame: pd.DataFrame, days: int | None) -> pd.DataFrame:
     return frame.loc[frame["HourUTC"] >= cutoff].reset_index(drop=True)
 
 
+EVALUATION_DAYS = {"last_10_days": 10, "last_30_days": 30}
+
+
 def _split_complete_day_holdout(
     history: pd.DataFrame,
     test_days: int,
@@ -342,8 +345,8 @@ def custom_strategy(payload: CustomStrategyRequest) -> dict[str, Any]:
     try:
         history, _, _ = _load_deployment_results()
         frame = prepare_custom_signals(history, payload)
-        if payload.evaluation == "last_10_days":
-            _, frame = _split_complete_day_holdout(frame, 10)
+        if payload.evaluation in EVALUATION_DAYS:
+            _, frame = _split_complete_day_holdout(frame, EVALUATION_DAYS[payload.evaluation])
         intervals, summary = run_custom_strategy(frame, payload)
     except (ValueError, TypeError, KeyError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -383,13 +386,27 @@ def _period_summary(frame: pd.DataFrame, intervals: pd.DataFrame, summary: dict[
     }
 
 
+def _robustness_periods(prepared: pd.DataFrame, evaluation: str) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, list[str]]:
+    """(earlier, test, evaluated, labels): a final-N-day test is compared with everything before it;
+    the full period is compared half against half."""
+    if evaluation in EVALUATION_DAYS:
+        days = EVALUATION_DAYS[evaluation]
+        earlier, test = _split_complete_day_holdout(prepared, days)
+        return earlier, test, test, ["Earlier period", f"Final {days} days"]
+    local_dates = pd.to_datetime(prepared["HourUTC"], utc=True).dt.tz_convert("Europe/Copenhagen").dt.date
+    dates = sorted(local_dates.unique())
+    second_half = local_dates >= dates[len(dates) // 2]
+    return (prepared[~second_half].reset_index(drop=True), prepared[second_half].reset_index(drop=True),
+            prepared, ["First half", "Second half"])
+
+
 @app.post("/api/custom-strategy/robustness")
 def custom_strategy_robustness(payload: CustomStrategyRequest) -> dict[str, Any]:
-    """Out-of-sample check (earlier period vs the final 10 days) and a threshold sensitivity grid."""
+    """Out-of-sample check (earlier period vs the test period) and a threshold sensitivity grid."""
     try:
         history, _, _ = _load_deployment_results()
         prepared = prepare_custom_signals(history, payload)
-        earlier, final = _split_complete_day_holdout(prepared, 10)
+        earlier, final, evaluated, labels = _robustness_periods(prepared, payload.evaluation)
     except (ValueError, TypeError, KeyError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -397,19 +414,18 @@ def custom_strategy_robustness(payload: CustomStrategyRequest) -> dict[str, Any]
     # Lagged inputs can be missing at the very start of the history; drop only those leading rows.
     finite = pd.Series(pd.to_numeric(earlier["Custom_Signal"], errors="coerce")).notna()
     earlier = earlier.loc[finite.idxmax():].reset_index(drop=True) if finite.any() else earlier
-    for name, frame in {"earlier": earlier, "final_10_days": final}.items():
+    for (name, frame), label in zip({"earlier": earlier, "test": final}.items(), labels):
         try:
             intervals, summary = run_custom_strategy(frame, payload)
-            periods[name] = _period_summary(frame, intervals, summary)
+            periods[name] = {"label": label, **_period_summary(frame, intervals, summary)}
         except (ValueError, TypeError, KeyError) as exc:
-            periods[name] = {"error": str(exc)}
+            periods[name] = {"label": label, "error": str(exc)}
 
     # Sensitivity: shift each threshold by up to ±2 steps (step = an eighth of the threshold gap).
     step = (payload.upper - payload.lower) / 8
     offsets = [-2, -1, 0, 1, 2]
     lowers = [payload.lower + k * step for k in offsets]
     uppers = [payload.upper + k * step for k in offsets]
-    evaluated = final if payload.evaluation == "last_10_days" else prepared
     grid: list[list[float | None]] = []
     for lower in lowers:
         row: list[float | None] = []

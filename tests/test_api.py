@@ -57,8 +57,8 @@ def test_deployment_results_use_real_predictions() -> None:
     response = client.get("/api/results")
     assert response.status_code == 200
     payload = response.json()
-    assert payload["dataset"]["rows"] == 2116
-    assert len(payload["prices"]) == 2116
+    assert payload["dataset"]["rows"] == 10744  # walk-forward out-of-sample history
+    assert len(payload["prices"]) == 10744
     assert len(payload["model_metrics"]) == 9
     sarimax_tl = next(
         row
@@ -72,9 +72,11 @@ def test_deployment_results_use_real_predictions() -> None:
         for row in payload["model_metrics"]
         if row["Model_Type"] == "Direct 15-minute EPF benchmark"
     )
-    assert payload["prices"][0]["Actual_Price"] == 106.029999
-    assert math.isclose(payload["prices"][0]["Actual_Price_DKK"], 792.200382, abs_tol=1e-6)
-    assert payload["prices"][0]["Imbalance_Price_DKK"] == 1307.51
+    # First walk-forward interval, 13 Nov 2025 00:00 UTC: thesis price 25.370001 EUR, Energinet imbalance 284 DKK.
+    assert payload["prices"][0]["HourUTC"].startswith("2025-11-13T00:00")
+    assert payload["prices"][0]["Actual_Price"] == 25.370001
+    assert math.isclose(payload["prices"][0]["Actual_Price_DKK"], 189.457796, abs_tol=1e-6)
+    assert payload["prices"][0]["Imbalance_Price_DKK"] == 284.0
     assert payload["dataset"]["price_currency"] == "EUR/MWh for battery; DKK/MWh for Prop"
 
 
@@ -269,8 +271,9 @@ def test_saved_comparisons_are_available_without_recalculation() -> None:
         assert payload["evaluation"]["test_days"] == 10
         assert payload["evaluation"]["daily_observations"] == 10
         assert len(payload["strategies"]) == expected_count
+        assert payload["request"]["days"] == 30  # matches the dashboard's default history window
         if setup == "battery":
-            assert math.isclose(payload["strategies"][0]["Cashflow"], 4572.405693674425)
+            assert math.isclose(payload["strategies"][0]["Cashflow"], 2199.148037903912)
         assert set(payload["strategy_series"]) == {
             row["Strategy"] for row in payload["strategies"]
         }

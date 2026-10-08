@@ -67,7 +67,7 @@
         <div><strong id="statIntervals">&#8212;</strong><span>saved 15-minute prediction intervals</span></div>
         <div><strong id="statMae">&#8212;</strong><span id="statMaeLabel">forecast MAE &#183; EUR/MWh</span></div>
         <div><strong id="statStrategies">12</strong><span>ready-made strategies to press</span></div>
-        <div><strong id="statDays">10</strong><span id="statDaysLabel">complete DK1 days in each replay</span></div>
+        <div><strong id="statDays">&#8212;</strong><span id="statDaysLabel">days of out-of-sample forecast history</span></div>
       </div>
     </div>
   </section>
@@ -341,7 +341,7 @@
               <label for="labMaxSize">Maximum size &#183; &#215; position size</label><input id="labMaxSize" type="number" value="2" min="1.01" max="10" step="any" required>
               <p>Size is 1&#215; at the entry thresholds and reaches the maximum at the outer thresholds. <strong>Step</strong> jumps straight to the maximum beyond them; <strong>scale</strong> ramps up linearly in between. Costs apply to every change in MWh, including resizing. Prop proxy only.</p>
             </div>
-            <label for="labEvaluation">Test period</label><select id="labEvaluation"><option value="last_10_days">Final 10 complete DK1 days</option><option value="full">Full saved dataset</option></select>
+            <label for="labEvaluation">Test period</label><select id="labEvaluation"><option value="last_10_days">Final 10 complete DK1 days &#183; quick replay</option><option value="last_30_days" selected>Final 30 complete DK1 days</option><option value="full">Whole walk-forward history (~3.5 months)</option></select>
             <p>Repeated tuning on these dates is exploratory, not independent validation.</p>
           </section>
           <section class="card"><h3><span>03</span> Model execution</h3>
@@ -397,6 +397,8 @@
     document.getElementById('statIntervals').textContent = fmt(data.dataset.rows, 0);
     const metric = data.model_metrics.find(row => row.Model === 'Transfer residual ensemble');
     if (metric) {document.getElementById('statMae').textContent = fmt(metric.MAE, 2); document.getElementById('statMaeLabel').textContent = `MAE · EUR/MWh · ${metric.Model}`;}
+    const span = (Date.parse(data.dataset.end) - Date.parse(data.dataset.start)) / 86400000;
+    if (Number.isFinite(span)) document.getElementById('statDays').textContent = fmt(Math.round(span), 0);
   }).catch(() => {});
 })();
 </script>

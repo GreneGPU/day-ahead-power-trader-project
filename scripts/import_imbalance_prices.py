@@ -1,7 +1,12 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
+import time
+from urllib.error import HTTPError
+from urllib.parse import urlencode
+from urllib.request import urlopen
 
 import numpy as np
 import pandas as pd
@@ -9,6 +14,7 @@ import pandas as pd
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SOURCE = Path.home() / "Downloads" / "ImbalancePrice (1).csv"
+ENERGINET_API = "https://api.energidataservice.dk/dataset/ImbalancePrice"
 
 PRICE_PAIRS = (
     ("ImbalancePriceEUR", "ImbalancePriceDKK"),
@@ -19,8 +25,30 @@ PRICE_PAIRS = (
 )
 
 
-def import_imbalance_prices(source: Path, output: Path) -> pd.DataFrame:
-    raw = pd.read_csv(source, sep=";", decimal=",")
+def fetch_imbalance_prices(start: pd.Timestamp, end: pd.Timestamp, chunk_days: int = 30) -> pd.DataFrame:
+    """Download DK1 imbalance prices from Energinet Data Service in chunks (API limit per request)."""
+    frames, cursor = [], start
+    while cursor < end:
+        stop = min(cursor + pd.Timedelta(days=chunk_days), end)
+        params = urlencode({"start": cursor.strftime("%Y-%m-%dT%H:%M"), "end": stop.strftime("%Y-%m-%dT%H:%M"),
+                            "filter": json.dumps({"PriceArea": ["DK1"]}, separators=(",", ":")), "limit": 0})
+        for attempt in range(6):  # the public API rate-limits bursts with HTTP 429
+            try:
+                with urlopen(f"{ENERGINET_API}?{params}", timeout=120) as response:  # noqa: S310
+                    frames.append(pd.DataFrame.from_records(json.load(response)["records"]))
+                break
+            except HTTPError as exc:
+                if exc.code != 429 or attempt == 5:
+                    raise
+                time.sleep(15 * (attempt + 1))
+        time.sleep(3)
+        cursor = stop
+    raw = pd.concat(frames, ignore_index=True).drop_duplicates(["TimeUTC", "PriceArea"])
+    return raw
+
+
+def import_imbalance_prices(source: Path | pd.DataFrame, output: Path) -> pd.DataFrame:
+    raw = source.copy() if isinstance(source, pd.DataFrame) else pd.read_csv(source, sep=";", decimal=",")
     raw["TimeUTC"] = pd.to_datetime(raw["TimeUTC"], utc=True, errors="raise")
     if set(raw["PriceArea"].unique()) != {"DK1"}:
         raise ValueError("The imbalance extract must contain DK1 only.")
@@ -94,8 +122,17 @@ def main() -> None:
         type=Path,
         default=PROJECT_ROOT / "deployment_data" / "imbalance_prices.csv.gz",
     )
+    parser.add_argument("--from-api", action="store_true",
+                        help="Download from Energinet Data Service for the saved prediction period instead of a CSV.")
     args = parser.parse_args()
-    frame = import_imbalance_prices(args.source, args.output)
+    source = args.source
+    if args.from_api:
+        times = pd.to_datetime(pd.read_csv(PROJECT_ROOT / "deployment_data" / "predictions.csv.gz", usecols=["HourUTC"])["HourUTC"], utc=True)
+        # The API reads bare timestamps as Danish local time, so request a day of buffer on both sides.
+        start = (times.min() - pd.Timedelta(days=1)).tz_convert(None).floor("D")
+        end = (times.max() + pd.Timedelta(days=2)).tz_convert(None).floor("D")
+        source = fetch_imbalance_prices(start, end)
+    frame = import_imbalance_prices(source, args.output)
     print(
         f"Wrote {args.output} with {len(frame):,} matched intervals from "
         f"{frame['HourUTC'].min()} through {frame['HourUTC'].max()}."

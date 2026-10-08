@@ -50,6 +50,14 @@ def cmd_run(args: argparse.Namespace) -> None:
     print("Wrote outputs to:", summary["output_dir"])
 
 
+def cmd_walk_forward(args: argparse.Namespace) -> None:
+    from .walk_forward import run_walk_forward
+
+    config = _load_with_overrides(args)
+    summary = run_walk_forward(config, min_train_days=args.min_train_days, block_days=args.block_days)
+    print(f"Wrote {summary['rows']} out-of-sample rows in {summary['blocks']} blocks to {config.output_dir}")
+
+
 def cmd_report(args: argparse.Namespace) -> None:
     config = _load_with_overrides(args)
     results_dir = Path(args.results_dir) if args.results_dir else Path(config.reference_results_dir)
@@ -150,6 +158,15 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--mlflow-experiment")
     run.add_argument("--mlflow-register-model")
     run.set_defaults(func=cmd_run)
+
+    walk = subparsers.add_parser("walk-forward", help="Expanding-window out-of-sample forecasts for the whole 15-min period.")
+    walk.add_argument("--data-dir")
+    walk.add_argument("--output-dir")
+    walk.add_argument("--champion")
+    walk.add_argument("--min-train-days", type=float, default=35)
+    walk.add_argument("--block-days", type=float, default=14)
+    walk.set_defaults(func=cmd_walk_forward, enable_mlflow=None, mlflow_tracking_uri=None,
+                      mlflow_experiment=None, mlflow_register_model=None)
 
     report = subparsers.add_parser("report", help="Build a static dashboard/report from saved forecast outputs.")
     report.add_argument("--results-dir")

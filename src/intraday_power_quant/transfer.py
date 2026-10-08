@@ -37,10 +37,12 @@ def _write_frame(df: pd.DataFrame, output_base: Path) -> dict[str, str]:
         return {"csv": str(csv_path), "xlsx_error": str(exc)}
 
 
-def run_transfer_learning(config: ProjectConfig) -> dict[str, object]:
-    output_dir = Path(config.output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
+def prepare_transfer_inputs(config: ProjectConfig) -> dict[str, object]:
+    """Load both datasets, train the hourly source model once and attach its baseline to every 15-min row.
 
+    The hourly model only sees data before ``config.transfer_start``, so the baseline is out of sample for
+    the whole 15-minute period. Shared by the single-split run and the walk-forward run.
+    """
     df_hourly, df_15, source_paths = load_market_data(
         config.data_dir,
         config.hourly_candidates,
@@ -127,6 +129,24 @@ def run_transfer_learning(config: ProjectConfig) -> dict[str, object]:
     df_15_transfer = df_15_transfer.dropna(subset=["Hourly_Baseline"]).reset_index(drop=True)
     df_15_transfer["residual_15min"] = df_15_transfer[config.target] - df_15_transfer["Hourly_Baseline"]
     df_15_transfer = df_15_transfer.sort_values(config.time_col).reset_index(drop=True)
+    return {
+        "df_hourly": df_hourly, "df_15": df_15, "source_paths": source_paths,
+        "feature_cols_15": feature_cols_15, "transferable_features": transferable_features,
+        "excluded_features": excluded_features, "warnings": warnings,
+        "df_hourly_source_train": df_hourly_source_train, "hourly_source_model": hourly_source_model,
+        "hourly_baseline_df": hourly_baseline_df, "df_15_transfer": df_15_transfer,
+    }
+
+
+def run_transfer_learning(config: ProjectConfig) -> dict[str, object]:
+    output_dir = Path(config.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    inputs = prepare_transfer_inputs(config)
+    df_hourly, df_15, source_paths = inputs["df_hourly"], inputs["df_15"], inputs["source_paths"]
+    feature_cols_15, transferable_features = inputs["feature_cols_15"], inputs["transferable_features"]
+    excluded_features, warnings = inputs["excluded_features"], inputs["warnings"]
+    df_hourly_source_train, hourly_source_model = inputs["df_hourly_source_train"], inputs["hourly_source_model"]
+    hourly_baseline_df, df_15_transfer = inputs["hourly_baseline_df"], inputs["df_15_transfer"]
 
     train_15_mask, test_15_mask, split_time, split_label = make_train_test_split_mask(
         df_15_transfer,
