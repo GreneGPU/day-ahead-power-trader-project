@@ -305,3 +305,9 @@ input[type=file]{padding:8px;font-size:12px}
   .rb-grid{grid-template-columns:1fr}
 }
 .rb-dates{color:var(--muted);font-size:11px;white-space:nowrap}
+.rb-sig{margin-top:24px;padding-top:20px;border-top:1px solid var(--line)}
+.rb-sig td:nth-child(2){white-space:normal;min-width:220px;color:var(--muted)}
+.rb-sig td:nth-child(3){white-space:normal;min-width:240px;text-align:left}
+.rb-sig td:last-child{font-weight:600;font-variant-numeric:tabular-nums}
+.rb-sig .p-strong{color:var(--green)}.rb-sig .p-weak{color:#b45309}.rb-sig .p-none{color:var(--red)}
+.rb-sig th,.rb-sig td{text-align:left!important;vertical-align:top}.rb-sig th:last-child,.rb-sig td:last-child{text-align:right!important}

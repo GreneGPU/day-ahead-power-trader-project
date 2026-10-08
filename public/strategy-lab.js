@@ -437,6 +437,7 @@
     const state=result?.robustness;
     if(state===robustShown)return; robustShown=state;
     el('rbBody').hidden=state?.status!=='ready';
+    el('rbSigBlock').hidden=state?.status!=='ready'||!state.data.significance;
     if(!state){el('rbStatus').textContent='Waiting for a backtest.';return;}
     if(state.status==='loading'){el('rbStatus').textContent='Running robustness checks…';return;}
     if(state.status==='error'){el('rbStatus').textContent=`Robustness checks unavailable: ${state.message}`;return;}
@@ -477,6 +478,34 @@
     el('rbPlateau').textContent=centre>0&&neighbours.length
       ?`Thresholds one step away keep ${Math.round(average/centre*100)}% of your rule’s P&L on average; ${profitable} of ${values.length} settings in the grid are profitable.`
       :`${profitable} of ${values.length} settings in the grid are profitable.`;
+    renderSignificance(state.data.significance);
+  }
+  // p-values for the run, plus a Bonferroni adjustment for how many rules were tried this session.
+  function renderSignificance(sig) {
+    const body=el('rbSig');body.replaceChildren();
+    if(!sig)return;
+    if(sig.error){el('rbSigVerdict').textContent=sig.error;return;}
+    const tried=runSerial, pText=p=>p<0.001?'< 0.001':p.toFixed(3), pClass=p=>p<0.05?'p-strong':p<0.10?'p-weak':'p-none';
+    const rows=[
+      ['Daily t-test','Mean daily P&L is zero',`${format(sig.mean_daily)} ± ${format(sig.sd_daily)} DKK/day over ${sig.days} days · t = ${format(sig.t_stat)}`,sig.p_daily],
+      ['Day shuffle','Today’s forecast adds nothing beyond the typical daily price shape',`${format(sig.actual_gross)} DKK actual vs ${format(sig.day_shuffle.null_mean)} with another day’s positions`,sig.day_shuffle.p],
+      ['Timing shift','Timing within the day does not matter',`${format(sig.actual_gross)} DKK actual vs ${format(sig.timing_shift.null_mean)} with positions shifted within the day`,sig.timing_shift.p],
+    ];
+    if(tried>1)rows.push(['Multiple testing',`Best of ${tried} rules tried this session`,`Bonferroni: daily p × ${tried}`,Math.min(1,sig.p_daily*tried)]);
+    for(const [test,hypothesis,evidence,p] of rows){
+      const tr=document.createElement('tr');
+      for(const value of [test,hypothesis,evidence,pText(p)]){const td=document.createElement('td');td.textContent=value;tr.append(td);}
+      tr.lastChild.className=pClass(p);body.append(tr);
+    }
+    const p=sig.p_daily,shuffle=sig.day_shuffle.p;
+    let verdict;
+    if(p<0.05&&shuffle<0.05)verdict='Significant at 5%: the mean P&L is positive, and the day-specific forecast adds value beyond the typical daily price shape.';
+    else if(p<0.05)verdict='The mean P&L is significantly positive, but shuffling days keeps most of it: the edge is mainly the typical daily price shape, not day-specific forecast skill.';
+    else verdict=`Not significant at 5% over ${sig.days} days, so chance cannot be ruled out.`
+      +(sig.days_needed_80pct_power?` At the current daily Sharpe (${format(sig.daily_sharpe)}), about ${sig.days_needed_80pct_power} days of data would give an 80% chance of detecting the edge.`:'')
+      +(shuffle>=0.05&&sig.actual_gross>0?' Shuffling days keeps most of the P&L, so much of it is the typical daily price shape.':'');
+    if(tried>1&&p<0.05&&p*tried>=0.05)verdict+=` After adjusting for the ${tried} rules tried this session, it is no longer significant.`;
+    el('rbSigVerdict').textContent=verdict;
   }
 
   // ---- Portfolio: net the selected runs into one book and re-simulate it with the Prop proxy rules ----

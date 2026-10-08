@@ -28,6 +28,7 @@ from intraday_power_quant.custom_strategy import (
     run_custom_strategy,
 )
 from intraday_power_quant.latest_prices import latest_prices
+from intraday_power_quant.significance import significance_tests
 from intraday_power_quant.imbalance_trading import (
     simulate_imbalance_perfect_foresight,
     simulate_imbalance_spread_positions,
@@ -429,10 +430,17 @@ def custom_strategy_robustness(payload: CustomStrategyRequest) -> dict[str, Any]
             except (ValueError, TypeError, KeyError):
                 row.append(None)
         grid.append(row)
+    significance = None
+    if payload.trading_setup == "prop":
+        try:
+            significance = significance_tests(run_custom_strategy(evaluated, payload)[0])
+        except (ValueError, TypeError, KeyError) as exc:
+            significance = {"error": str(exc)}
     return _clean_json({
         "periods": periods,
         "grid": {"lowers": lowers, "uppers": uppers, "pnl": grid, "evaluated_rows": len(evaluated),
                  "evaluation": payload.evaluation},
+        "significance": significance,
     })
 
 

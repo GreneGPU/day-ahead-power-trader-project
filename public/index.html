@@ -288,6 +288,12 @@
               <p class="rb-note">Rows: lower threshold &#183; columns: upper threshold &#183; outlined: your rule. A robust edge shows a plateau of similar values around your rule, not a lone peak.</p>
             </div>
           </div>
+          <div class="rb-sig" id="rbSigBlock" hidden>
+            <h4>Significance &#183; could this P&amp;L be chance?</h4>
+            <div class="table-wrap"><table><thead><tr><th>Test</th><th>Null hypothesis</th><th>Evidence</th><th>p-value</th></tr></thead><tbody id="rbSig"></tbody></table></div>
+            <p class="rb-verdict" id="rbSigVerdict"></p>
+            <p class="rb-note">One-sided p-values on the backtest&#8217;s test period, complete days only. Daily P&amp;L is the honest unit: 15-minute P&amp;L is autocorrelated, so testing intervals would overstate significance. Permutation tests keep the strategy&#8217;s exact positions and only break their link to prices (2,000 draws, gross of costs).</p>
+          </div>
         </article>
         <article class="card log"><div class="card-head"><h3>Signal &amp; execution log</h3><p><span id="labLogCount"></span> <span class="positive">Long</span> / <span class="negative">Short</span>. Other intervals are collapsed below.</p></div><div class="table-wrap"><table><thead><tr><th>Time &#183; UTC</th><th>Signal</th><th>Requested</th><th>Executed</th><th>Cashflow &#183; DKK</th><th>Cumulative &#183; DKK</th></tr></thead><tbody id="labRows"></tbody></table></div><p id="labNoTrades" hidden>No executed positions through this replay time.</p><details id="labOtherIntervals" class="help-details"><summary id="labOtherCount">Other intervals</summary><div class="table-wrap"><table><thead><tr><th>Time &#183; UTC</th><th>Signal</th><th>Requested</th><th>Executed</th><th>Cashflow &#183; DKK</th><th>Cumulative &#183; DKK</th></tr></thead><tbody id="labOtherRows"></tbody></table></div></details></article>
       </div>
