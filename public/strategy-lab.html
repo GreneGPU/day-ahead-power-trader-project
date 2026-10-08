@@ -46,6 +46,11 @@
           <span class="sl-tag"><i class="live-dot" aria-hidden="true"></i>Real DK1 history &#183; DKK</span>
         </div>
 
+        <div class="sl-library" aria-labelledby="libraryTitle">
+          <div class="sl-library-head"><span class="sl-label" id="libraryTitle">Strategy library &#183; press one to replay it</span><span class="sl-library-note">Each preset fills in the formula and thresholds below. Tweak them to make it your own.</span></div>
+          <div class="strategy-grid" id="strategyLibrary"></div>
+        </div>
+
         <div class="factor-grid" id="factorGrid" aria-label="Saved model inputs at the replay time"></div>
 
         <div class="sl-price">
@@ -62,7 +67,7 @@
 
         <div class="sl-chart">
           <canvas id="signalCanvas" role="img" aria-label="Historical day-ahead price and custom signal, with shaded long and short position intervals"></canvas>
-          <p id="replayLaunchStatus" class="sl-overlay" role="status">Loading residual-demand replay&#8230;</p>
+          <p id="replayLaunchStatus" class="sl-overlay" role="status">Loading the cheapest-20% / priciest-20% replay&#8230;</p>
         </div>
         <div class="sl-legend" aria-hidden="true"><span class="lg-price">Day-ahead price</span><span class="lg-signal">Signal</span><span class="lg-threshold">Thresholds</span><span class="lg-long">Long</span><span class="lg-short">Short</span></div>
 
@@ -80,9 +85,8 @@
           <div id="labFormulaFields">
             <div class="sl-code-head">
               <span class="sl-label">Try coding your own signals</span>
-              <div class="formula-presets" aria-label="Formula presets"><button type="button" data-formula="signal = -wind">Wind fade</button><button type="button" data-formula="signal = demand - wind - solar">Residual demand</button><button type="button" data-formula="signal = forecast - baseline">Forecast spread</button><button type="button" data-formula="signal = temperature_lag_96 - temperature_lag_192">Temperature change</button></div>
             </div>
-            <div class="code-line"><span class="ln" aria-hidden="true">01</span><label class="visually-hidden" for="labFormula">Signal formula</label><textarea id="labFormula" maxlength="500" rows="1" spellcheck="false" required>signal = demand - wind - solar</textarea></div>
+            <div class="code-line"><span class="ln" aria-hidden="true">01</span><label class="visually-hidden" for="labFormula">Signal formula</label><textarea id="labFormula" maxlength="500" rows="1" spellcheck="false" required>signal = forecast_rank</textarea></div>
           </div>
           <p class="code-line source-note" id="labSourceNote" hidden></p>
           <div class="code-line"><span class="ln" aria-hidden="true">02</span><code class="rule-code" id="labRuleSummary"></code><button type="button" class="code-link" id="editSignal">Edit thresholds &#8599;</button></div>
@@ -100,7 +104,7 @@
         </div>
 
         <div class="sl-names">
-          <div><span class="sl-label">Names</span><span class="name-list"><button type="button" data-variable="wind">wind</button><button type="button" data-variable="solar">solar</button><button type="button" data-variable="demand">demand</button><button type="button" data-variable="forecast">forecast</button><button type="button" data-variable="baseline">baseline</button><button type="button" data-variable="temperature_lag_96">temperature_lag_96</button><button type="button" data-variable="gas_price_lag_96">gas_price_lag_96</button><a href="#strategyEditor" class="name-more">+ all inputs</a></span></div>
+          <div><span class="sl-label">Names</span><span class="name-list"><button type="button" data-variable="wind">wind</button><button type="button" data-variable="solar">solar</button><button type="button" data-variable="demand">demand</button><button type="button" data-variable="forecast">forecast</button><button type="button" data-variable="baseline">baseline</button><button type="button" data-variable="forecast_rank">forecast_rank</button><button type="button" data-variable="forecast_z">forecast_z</button><button type="button" data-variable="forecast_spread">forecast_spread</button><button type="button" data-variable="hour">hour</button><button type="button" data-variable="temperature_lag_96">temperature_lag_96</button><button type="button" data-variable="gas_price_lag_96">gas_price_lag_96</button><a href="#strategyEditor" class="name-more">+ all inputs</a></span></div>
           <div><span class="sl-label">Functions</span><span class="name-list mono">sign() &#183; abs() &#183; min() &#183; max() &#183; clamp() &#183; avg()</span></div>
         </div>
 
@@ -128,7 +132,7 @@
       <details class="strategy-editor" id="strategyEditor"><summary><span><span class="kicker">Strategy settings</span><b>Signal source, thresholds, sizing and data uploads</b></span><span class="chev" aria-hidden="true">&#8250;</span></summary>
         <div class="lab-columns">
           <section class="card"><h3><span>01</span> Define the signal</h3>
-            <label for="labName">Strategy name</label><input id="labName" maxlength="80" value="Residual demand" required>
+            <label for="labName">Strategy name</label><input id="labName" maxlength="80" value="Cheapest 20% / priciest 20%" required>
             <label for="labSignal">Signal source</label><select id="labSignal"><option value="formula">Write a formula</option><option value="baseline_spread">Forecast minus hourly baseline</option><option value="forecast">Forecast price</option><option value="forecast_change">Forecast change over prior intervals</option><option value="csv">My signal &#183; CSV upload</option></select>
             <div id="labFormulaExtras">
               <p><strong>Upload required:</strong> <code>outages</code> in MW. Missing data is never assumed to be zero.</p>
@@ -137,6 +141,7 @@
                 <dl>
                   <dt>Power forecasts</dt><dd><code>wind</code>, <code>solar</code>, <code>demand</code> (or <code>load_fc</code>) in MW.</dd>
                   <dt>Price forecasts</dt><dd><code>forecast</code>, <code>baseline</code> in DKK/MWh.</dd>
+                  <dt>Daily forecast shape</dt><dd><code>forecast_rank</code> (0 = the delivery day&#8217;s cheapest forecast interval, 100 = its priciest), <code>forecast_z</code> (standard deviations from the day&#8217;s mean), <code>forecast_spread</code> (day&#8217;s max &#8722; min, DKK/MWh) and <code>hour</code> (Copenhagen time, 0&#8211;23.75). The full next-day curve is known before the day-ahead auction.</dd>
                   <dt>Weather history</dt><dd><code>temperature_lag_*</code>, <code>humidity_lag_*</code>, <code>weather_wind_speed_lag_*</code>.</dd>
                   <dt>Gas price history</dt><dd><code>gas_price_lag_*</code>, plus the daily change and seven-day mean listed below.</dd>
                   <dt>System balance history</dt><dd><code>system_balance_MWh_known_lag96</code> in MWh.</dd>
@@ -155,8 +160,8 @@
             <p id="labSignalHelp">Forecast minus the hourly baseline, in DKK/MWh. Negative values mean the forecast is lower.</p>
           </section>
           <section class="card"><h3><span>02</span> Set the rules</h3>
-            <label for="labDirection">Rule direction</label><select id="labDirection"><option value="buy_low">Long low / short high</option><option value="buy_high" selected>Long high / short low</option></select>
-            <div class="pair"><div><label for="labLower">Lower threshold</label><input id="labLower" type="number" value="-500" min="-1000000" max="1000000" step="any" required></div><div><label for="labUpper">Upper threshold</label><input id="labUpper" type="number" value="500" min="-1000000" max="1000000" step="any" required></div></div>
+            <label for="labDirection">Rule direction</label><select id="labDirection"><option value="buy_low" selected>Long low / short high</option><option value="buy_high">Long high / short low</option></select>
+            <div class="pair"><div><label for="labLower">Lower threshold</label><input id="labLower" type="number" value="20" min="-1000000" max="1000000" step="any" required></div><div><label for="labUpper">Upper threshold</label><input id="labUpper" type="number" value="80" min="-1000000" max="1000000" step="any" required></div></div>
             <label for="labEvaluation">Test period</label><select id="labEvaluation"><option value="last_10_days">Final 10 complete DK1 days</option><option value="full">Full saved dataset</option></select>
             <p>Repeated tuning on these dates is exploratory, not independent validation.</p>
           </section>

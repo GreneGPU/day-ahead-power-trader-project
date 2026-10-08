@@ -200,6 +200,31 @@ def test_prop_replay_fields_reconcile_to_summary():
     assert all(r['Position'] in (-1,0,1) for r in rows)
 
 
+def test_daily_forecast_features_rank_within_copenhagen_day():
+    from intraday_power_quant.custom_strategy import daily_forecast_features
+    # 22:00-23:30 UTC on 1 Jan is 23:00-00:30 Copenhagen time, so the last two rows start a new local day.
+    times = pd.Series(pd.date_range('2026-01-01 21:00', periods=6, freq='30min', tz='UTC'))
+    forecast = pd.Series([30., 10., 20., 40., 5., 7.])
+    out = daily_forecast_features(times, forecast)
+    assert out['Forecast_Daily_Rank'].tolist() == pytest.approx([200/3, 0, 100/3, 100, 0, 100])
+    assert out['Forecast_Daily_Spread'].tolist() == [30, 30, 30, 30, 2, 2]
+    assert out['Local_Hour'].tolist() == [22, 22.5, 23, 23.5, 0, 0.5]
+    single = daily_forecast_features(times.iloc[:1], forecast.iloc[:1])
+    assert single['Forecast_Daily_Rank'].item() == 50 and single['Forecast_Daily_Z'].item() == 0
+
+
+def test_cheapest_and_priciest_fifth_preset_trades_each_day():
+    response = client.post('/api/custom-strategy', json={
+        'signal': 'formula', 'formula': 'signal = forecast_rank', 'direction': 'buy_low',
+        'lower': 20, 'upper': 80, 'trading_setup': 'prop'})
+    assert response.status_code == 200, response.text
+    rows = pd.DataFrame(response.json()['intervals'])
+    day = pd.to_datetime(rows['HourUTC'], utc=True).dt.tz_convert('Europe/Copenhagen').dt.date
+    counts = rows.groupby(day)['Signal_Action'].value_counts().unstack(fill_value=0)
+    # 96 intervals a day: ranks 0-20 (long) and 80-100 (short) each cover about a fifth of the day.
+    assert counts['charge'].between(18, 22).all() and counts['discharge'].between(18, 22).all()
+
+
 def test_replay_factors_align_with_intervals():
     from api.index import _load_deployment_results
     frame, _, _ = _load_deployment_results()

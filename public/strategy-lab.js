@@ -11,7 +11,48 @@
   const chartFont = '11px ui-monospace,SFMono-Regular,Consolas,monospace';
   // Saved model inputs shown as tiles above the replay chart: [key in result.factors, label, unit].
   const factorTiles = [['wind','Wind','MW'],['solar','Solar','MW'],['demand','Demand','MW'],['forecast','Price forecast','DKK'],
-    ['baseline','Hourly baseline','DKK'],['temperature','Temperature · 1d lag',''],['gas','Gas price · 1d lag',''],['humidity','Humidity · 1d lag','']];
+    ['baseline','Hourly baseline','DKK'],['temperature','Temperature · 1d lag',''],['gas','Gas price · 1d lag',''],['rank','Forecast daily rank','/100']];
+  // Strategy library. Thresholds sit near the 20th/80th percentiles of each signal in the saved DK1 data.
+  // buy_low: long when signal <= lower, short when signal >= upper; buy_high is the mirror image.
+  const presets = [
+    {tag:'Daily shape',name:'Cheapest 20% / priciest 20%',desc:'Long the day’s 20% lowest-forecast intervals, short the 20% highest.',formula:'signal = forecast_rank',direction:'buy_low',lower:20,upper:80},
+    {tag:'Daily shape',name:'Extremes only · 10% / 10%',desc:'Trade only the day’s most extreme forecast prices.',formula:'signal = forecast_rank',direction:'buy_low',lower:10,upper:90},
+    {tag:'Daily shape',name:'Wide-spread days only',desc:'Cheapest/priciest 20%, but only on days whose forecast spread exceeds 600 DKK.',formula:'signal = 50 + (forecast_rank - 50) * clamp((forecast_spread - 600) * 1000, 0, 1)',direction:'buy_low',lower:20,upper:80},
+    {tag:'Daily shape',name:'Daily z-score reversion',desc:'Long when the forecast is 1σ below its daily mean, short 1σ above.',formula:'signal = forecast_z',direction:'buy_low',lower:-1,upper:1},
+    {tag:'Time of day',name:'Night long, evening short',desc:'Long 00:00–05:00, short from 17:00, Copenhagen time.',formula:'signal = hour',direction:'buy_low',lower:5,upper:17},
+    {tag:'Fundamentals',name:'Residual demand',desc:'Long when demand minus wind and solar is tight, short when it is loose.',formula:'signal = demand - wind - solar',direction:'buy_high',lower:600,upper:2300},
+    {tag:'Fundamentals',name:'Wind fade',desc:'Long on calm intervals (wind < 700 MW), short when wind > 2,300 MW.',formula:'signal = -wind',direction:'buy_high',lower:-2300,upper:-700},
+    {tag:'Fundamentals',name:'Power vs gas',desc:'Long when power is cheap relative to yesterday’s gas price, short when rich.',formula:'signal = forecast / gas_price_lag_96',direction:'buy_low',lower:18,upper:29},
+    {tag:'Forecast',name:'Below the hourly baseline',desc:'Long when the 15-min forecast sits under the hourly baseline, short when well above.',formula:'signal = forecast - baseline',direction:'buy_low',lower:5,upper:70},
+    {tag:'Forecast',name:'Forecast momentum',desc:'Follow the forecast’s 1-hour move: long if up > 65 DKK, short if down > 65.',signal:'forecast_change',lookback:4,direction:'buy_high',lower:-65,upper:65},
+  ];
+  function presetRule(p) {
+    const low=p.direction==='buy_low';
+    return `${(p.formula||'signal = forecast change, 1h').replace(/^signal = /,'')} · long ${low?'≤':'≥'} ${low?p.lower:p.upper} · short ${low?'≥':'≤'} ${low?p.upper:p.lower}`;
+  }
+  function buildLibrary() {
+    el('strategyLibrary').replaceChildren(...presets.map((p,i)=>{
+      const card=document.createElement('button');card.type='button';card.className='strategy-card';card.dataset.preset=String(i);card.setAttribute('aria-pressed','false');
+      const parts=[['span','tag',p.tag],['b','',p.name],['small','',p.desc],['code','',presetRule(p)]];
+      for(const [tag,cls,text] of parts){const node=document.createElement(tag);if(cls)node.className=cls;node.textContent=text;card.append(node);}
+      card.addEventListener('click',()=>applyPreset(p));
+      return card;
+    }));
+  }
+  function matchesPreset(p) {
+    const signal=p.signal||'formula';
+    return el('labSignal').value===signal && (signal!=='formula'||el('labFormula').value.trim()===p.formula)
+      && (signal!=='forecast_change'||number('labLookback')===p.lookback)
+      && el('labDirection').value===p.direction && number('labLower')===p.lower && number('labUpper')===p.upper;
+  }
+  function applyPreset(p) {
+    if(busy||readingFile)return;
+    el('labSignal').value=p.signal||'formula';
+    if(p.formula)el('labFormula').value=p.formula;
+    if(p.lookback)el('labLookback').value=p.lookback;
+    el('labName').value=p.name; el('labDirection').value=p.direction; el('labLower').value=p.lower; el('labUpper').value=p.upper;
+    updateFields(); dirty(); initialReplay=true; el('labForm').requestSubmit();
+  }
   function compact(value) {return value==null||!Number.isFinite(value)?'—':Number(value).toLocaleString('en-DK',{maximumFractionDigits:Math.abs(value)>=100?0:2});}
   function buildFactors() {
     el('factorGrid').replaceChildren(...factorTiles.map(([key,label,unit])=>{
@@ -99,7 +140,7 @@
     const buy = prop ? 'long' : 'charge', sell = prop ? 'short' : 'discharge';
     const low = el('labDirection').value === 'buy_low';
     el('labRuleSummary').textContent = `position = ${low ? buy : sell} if signal ≤ ${el('labLower').value} · ${low ? sell : buy} if signal ≥ ${el('labUpper').value} · else ${prop ? 'flat' : 'hold'}`;
-    document.querySelectorAll('[data-formula]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.formula === el('labFormula').value.trim())));
+    el('strategyLibrary').querySelectorAll('[data-preset]').forEach(card => card.setAttribute('aria-pressed', String(matchesPreset(presets[Number(card.dataset.preset)]))));
     const help = {
       formula: 'Your formula is calculated at each timestamp. Set the direction and thresholds to turn the signal into positions.',
       baseline_spread: 'Forecast minus the hourly baseline, in DKK/MWh. Negative values mean the forecast is lower.',
@@ -318,10 +359,6 @@
   el('labLoad').addEventListener('click',()=>{
     try{const saved=JSON.parse(localStorage.getItem('power-trader-custom-rules-v1'));if(!saved)throw new Error('No saved rules on this device.');for(const id of fields)if(typeof saved[id]==='string')el(id).value=saved[id];fundamentals=null;el('labFundamentals').value='';el('labFundamentalStatus').textContent='Upload fundamentals again if your formula needs them.';records=null;el('labCsv').value='';el('labCsvStatus').textContent='No file loaded.';updateFields();dirty();status('Rules loaded. Upload your CSV again if needed, then run the test.');}catch(error){status(error.message,true);}
   });
-  document.querySelectorAll('[data-formula]').forEach(button => button.addEventListener('click', () => {
-    el('labFormula').value = button.dataset.formula; el('labName').value = button.textContent; dirty(); updateFields();
-    status('Formula selected. Check your inputs, direction and thresholds before running.');
-  }));
   el('labFundamentals').addEventListener('change', async () => {
     fundamentals = null; dirty(); const file = el('labFundamentals').files[0];
     if (!file) {el('labFundamentalStatus').textContent='Using saved forecasts only.'; return;}
@@ -380,6 +417,6 @@
   el('signalCanvas').addEventListener('mouseleave',()=>drawSignal());
   // The inline editor behaves like a one-line code cell: Enter runs it, Shift+Enter adds a line.
   el('labFormula').addEventListener('keydown',event=>{if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();el('labForm').requestSubmit();}});
-  window.addEventListener('resize',draw); buildFactors(); updateFields();
+  window.addEventListener('resize',draw); buildFactors(); buildLibrary(); updateFields();
   el('labForm').requestSubmit();
 })();

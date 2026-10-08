@@ -10,7 +10,8 @@ THESIS_FEATURES = ["system_balance_MWh_known_lag96"] + [
     f"{name}_lag_{lag}" for name in ("temperature", "humidity", "weather_wind_speed", "gas_price")
     for lag in (96, 192, 672)
 ] + ["gas_price_change_1d_known_lag96", "gas_price_roll_mean_7d_known_lag96", "load_fc"]
-VARIABLES = set(THESIS_FEATURES) | {"wind", "solar", "demand", "outages", "forecast", "baseline"}
+DAILY_FORECAST_VARIABLES = {"forecast_rank", "forecast_z", "forecast_spread", "hour"}
+VARIABLES = set(THESIS_FEATURES) | DAILY_FORECAST_VARIABLES | {"wind", "solar", "demand", "outages", "forecast", "baseline"}
 OPERATORS = {ast.Add: operator.add, ast.Sub: operator.sub,
              ast.Mult: operator.mul, ast.Div: operator.truediv}
 

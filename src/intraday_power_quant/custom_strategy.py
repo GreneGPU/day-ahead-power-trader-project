@@ -96,13 +96,38 @@ class CustomStrategyRequest(StrictModel):
         return self
 
 
+MARKET_TIMEZONE = "Europe/Copenhagen"
+DAILY_FORECAST_COLUMNS = {"forecast_rank": "Forecast_Daily_Rank", "forecast_z": "Forecast_Daily_Z",
+                          "forecast_spread": "Forecast_Daily_Spread", "hour": "Local_Hour"}
+
+
+def daily_forecast_features(times: pd.Series, forecast: pd.Series) -> pd.DataFrame:
+    """Shape of each delivery day's forecast curve, all known before the day-ahead auction.
+
+    forecast_rank is 0 for the day's cheapest forecast interval and 100 for the priciest.
+    """
+    local = pd.to_datetime(times, utc=True).dt.tz_convert(MARKET_TIMEZONE)
+    grouped = forecast.groupby(local.dt.date)
+    count = grouped.transform("count")
+    rank = (grouped.rank(method="average") - 1) / (count - 1).where(count > 1) * 100
+    std = grouped.transform("std")
+    return pd.DataFrame({
+        "Forecast_Daily_Rank": rank.fillna(50.0),
+        "Forecast_Daily_Z": ((forecast - grouped.transform("mean")) / std.where(std > 0)).fillna(0.0),
+        "Forecast_Daily_Spread": grouped.transform("max") - grouped.transform("min"),
+        "Local_Hour": local.dt.hour + local.dt.minute / 60,
+    }, index=forecast.index)
+
+
 def prepare_custom_signals(history: pd.DataFrame, request: CustomStrategyRequest) -> pd.DataFrame:
     frame = history.copy().sort_values("HourUTC").reset_index(drop=True)
     # All custom tests use DKK consistently, including battery settlement and fees.
     frame["Actual_Price"] = frame["Actual_Price_DKK"]
     forecast = frame[f"{request.forecast_col}_DKK"]
+    frame[list(DAILY_FORECAST_COLUMNS.values())] = daily_forecast_features(frame["HourUTC"], forecast)
     if request.signal == "formula":
-        inputs = {"forecast": forecast, "baseline": frame["Hourly_Baseline_DKK"]}
+        inputs = {"forecast": forecast, "baseline": frame["Hourly_Baseline_DKK"],
+                  **{name: frame[column] for name, column in DAILY_FORECAST_COLUMNS.items()}}
         for name, column in {"wind": "Wind_Total_DayAhead_MW", "solar": "Solar_DayAhead_MW", "demand": "load_fc", **{name: name for name in THESIS_FEATURES}}.items():
             if column in frame:
                 inputs[name] = frame[column]

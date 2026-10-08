@@ -350,7 +350,7 @@ def custom_strategy(payload: CustomStrategyRequest) -> dict[str, Any]:
     factor_columns = {"wind": "Wind_Total_DayAhead_MW", "solar": "Solar_DayAhead_MW",
                       "demand": "load_fc", "forecast": f"{payload.forecast_col}_DKK",
                       "baseline": "Hourly_Baseline_DKK", "temperature": "temperature_lag_96",
-                      "gas": "gas_price_lag_96", "humidity": "humidity_lag_96"}
+                      "gas": "gas_price_lag_96", "rank": "Forecast_Daily_Rank"}
     by_time = frame.set_index("HourUTC").reindex(intervals["HourUTC"])
     factors = {name: by_time[column].tolist() for name, column in factor_columns.items() if column in by_time}
     return _clean_json({
