@@ -229,6 +229,32 @@
           <div class="table-wrap"><table id="replayRunsTable"><thead><tr><th>Run</th><th>Signal</th><th>Strength</th><th>Position</th><th data-window="96">P&amp;L &#183; 24 h</th><th data-window="672">P&amp;L &#183; 7 days</th><th data-window="all">P&amp;L &#183; whole test</th></tr></thead><tbody id="replayComparisons"></tbody></table></div>
           <p class="sl-note">P&amp;L columns are in DKK after costs, each ending at the replay time; the highlighted one matches the chart window. Strength is the distance from the midpoint of your thresholds: +100% reaches the long threshold, &#8722;100% the short one. It is not a probability. Up to five runs stay in this tab; changing the test period starts a new comparison.</p>
         </div>
+
+        <div class="sl-portfolio" id="portfolio" aria-labelledby="pfTitle">
+          <div class="sl-portfolio-head">
+            <div><span class="sl-label" id="pfTitle">Portfolio &#183; combine runs into one book</span><p class="sl-note">Positions from the selected runs are added up per 15-minute interval, so opposite trades cancel before costs. The book is re-simulated with the same rules: next day-ahead move, imbalance close at day end, costs on every MWh change. Results follow the chart window.</p></div>
+            <div class="pf-controls">
+              <label class="sl-speed" for="pfWeighting">Weights <select id="pfWeighting"><option value="equal">Equal size</option><option value="inverse_vol">Inverse volatility</option><option value="manual">Manual</option></select></label>
+              <label class="sl-speed" for="pfCap">Net cap &#183; MWh <input id="pfCap" type="number" min="0" step="any" value="0"></label>
+              <label class="sl-speed" for="pfLoss">Daily loss limit &#183; DKK <input id="pfLoss" type="number" min="0" step="any" value="0"></label>
+            </div>
+          </div>
+          <p class="pf-empty" id="pfEmpty">Run at least two strategies (press two cards in the library) to build a portfolio.</p>
+          <div id="pfBody" hidden>
+            <div class="table-wrap"><table id="pfWeights"><thead><tr><th>Run</th><th>In book</th><th>Weight &#215;</th><th>Hourly P&amp;L &#963; &#183; DKK</th><th>Stand-alone P&amp;L &#183; window</th></tr></thead><tbody id="pfWeightRows"></tbody></table></div>
+            <div class="pf-stats">
+              <div><small>Portfolio P&amp;L &#183; window</small><strong id="pfPnl">&#8212;</strong><span id="pfPnlNote"></span></div>
+              <div><small>Sum of stand-alone runs</small><strong id="pfStandalone">&#8212;</strong><span>same weights, traded separately</span></div>
+              <div><small>Costs saved by netting</small><strong id="pfSaved">&#8212;</strong><span id="pfTurnover"></span></div>
+              <div><small>Max drawdown &#183; window</small><strong id="pfDrawdown">&#8212;</strong><span>portfolio, after costs</span></div>
+              <div><small>Net exposure &#183; avg / max</small><strong id="pfExposure">&#8212;</strong><span id="pfLimits"></span></div>
+              <div><small>Diversification ratio</small><strong id="pfDiversification">&#8212;</strong><span>&#931; weighted &#963; &#247; portfolio &#963; &#183; &gt;1 = diversified</span></div>
+            </div>
+            <div class="pf-chart"><div class="pf-chart-head"><span class="sl-label">Cumulative P&amp;L &#183; DKK</span><span class="pf-legend"><i class="pf-l-book"></i>Netted book <i class="pf-l-sum"></i>Sum of stand-alone <i class="pf-l-exp"></i>Net exposure</span></div><canvas id="portfolioCanvas" role="img" aria-label="Cumulative portfolio P&amp;L against the sum of stand-alone runs, with net exposure bars"></canvas></div>
+            <div class="pf-corr"><span class="sl-label">Hourly P&amp;L correlation &#183; whole test</span><div class="table-wrap"><table id="pfCorr"></table></div></div>
+            <p class="sl-note" id="pfNotes"></p>
+          </div>
+        </div>
       </div>
     </div>
   </section>

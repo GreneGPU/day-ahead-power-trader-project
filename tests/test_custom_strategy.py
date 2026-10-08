@@ -198,6 +198,8 @@ def test_prop_replay_fields_reconcile_to_summary():
     assert rows[-1]['Equity_DKK'] == pytest.approx(data['summary']['ending_equity_dkk'])
     assert rows[-1]['Position_After_Settlement'] == 0
     assert all(r['Position'] in (-1,0,1) for r in rows)
+    # Fields the browser needs to re-simulate a netted portfolio of runs.
+    assert rows[-1]['Is_Day_End'] is True and all('Imbalance_Spread_DKK' in r for r in rows)
 
 
 def test_daily_forecast_features_rank_within_copenhagen_day():

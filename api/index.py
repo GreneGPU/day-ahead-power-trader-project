@@ -344,8 +344,9 @@ def custom_strategy(payload: CustomStrategyRequest) -> dict[str, Any]:
     columns = ["HourUTC", "Custom_Signal", "Signal_Action", "Action", "Actual_Price",
                "Dispatch_MW", "State_Of_Charge_MWh", "Cashflow", "Cumulative_Cashflow"]
     if payload.trading_setup == "prop":
+        # Imbalance spread and day-end flags let the browser re-simulate a netted portfolio of runs.
         columns += ["Position", "Position_MWh", "Size_Multiplier", "Position_After_Settlement",
-                    "Transaction_Cost", "Equity_DKK", "Settlement_Basis"]
+                    "Transaction_Cost", "Equity_DKK", "Settlement_Basis", "Imbalance_Spread_DKK", "Is_Day_End"]
     # Saved model inputs aligned to each interval, for the Strategy Lab factor tiles.
     factor_columns = {"wind": "Wind_Total_DayAhead_MW", "solar": "Solar_DayAhead_MW",
                       "demand": "load_fc", "forecast": f"{payload.forecast_col}_DKK",
