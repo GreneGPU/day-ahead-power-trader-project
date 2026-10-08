@@ -113,8 +113,8 @@
     <a class="brand" href="/"><span class="brand-mark" aria-hidden="true">g</span><span class="brand-name">Jakob Grene</span> <small>Power research</small></a>
     <nav class="site-nav" aria-label="Site">
       <a href="#model">How it works</a>
-      <a href="#benchmarks">Benchmarks</a>
       <a href="/strategy-lab.html">Strategy Lab</a>
+      <a href="#benchmarks">Benchmarks</a>
     </nav>
     <div class="header-actions"><a class="btn btn-ghost" href="/api/docs">API reference</a><a class="btn btn-primary" href="/strategy-lab.html">Open Strategy Lab <span class="chev" aria-hidden="true">&#8250;</span></a></div>
   </div>
@@ -234,10 +234,19 @@
     </div>
   </section>
 
+  <section class="section" id="lab" aria-labelledby="cta-title">
+    <div class="wrap">
+      <div class="cta-card">
+        <div><span class="kicker" style="color:#a5b4fc">02 / Strategy Lab</span><h2 id="cta-title" style="margin-top:10px">Finding signal <span>in complexity.</span></h2><p>Press one of ten ready-made strategies &#8212; like long the day&#8217;s cheapest 20% and short the priciest 20% &#8212; or write your own rule such as <code>signal = demand - wind - solar</code>, then replay it against real DK1 prices one 15-minute interval at a time.</p></div>
+        <a class="btn btn-primary" href="/strategy-lab.html">Open Strategy Lab <span class="chev" aria-hidden="true">&#8250;</span></a>
+      </div>
+    </div>
+  </section>
+
   <section class="section soft" id="benchmarks" aria-labelledby="bench-title">
     <div class="wrap dash">
       <div class="section-head">
-        <span class="kicker">02 / Benchmarks</span>
+        <span class="kicker">03 / Benchmarks</span>
         <div><h2 class="display" id="bench-title">Every strategy, the same forecast. <span class="soft" id="pageLede">Compare forecast-driven battery strategies across the saved 15-minute test predictions.</span></h2></div>
       </div>
   <nav class="workspace-nav" aria-label="Workspace"><button type="button" class="active" data-trading-setup="battery" aria-pressed="true">Physical battery</button><button type="button" data-trading-setup="prop" aria-pressed="false">Prop proxy</button><a href="/strategy-lab.html">Strategy Lab</a></nav>
@@ -333,17 +342,8 @@
   </section>
     </div>
   </section>
-
-  <section class="section" aria-labelledby="cta-title">
-    <div class="wrap">
-      <div class="cta-card">
-        <div><span class="kicker" style="color:#a5b4fc">03 / Strategy Lab</span><h2 id="cta-title" style="margin-top:10px">Finding signal <span>in complexity.</span></h2><p>Write a rule like <code>signal = demand - wind - solar</code>, then replay it against real DK1 prices one 15-minute interval at a time.</p></div>
-        <a class="btn btn-primary" href="/strategy-lab.html">Open Strategy Lab <span class="chev" aria-hidden="true">&#8250;</span></a>
-      </div>
-    </div>
-  </section>
 </main>
-<footer class="site-footer"><div class="wrap"><span id="sourceNote">Research tooling only &#8212; not financial advice or a production trading system.</span><span><a href="#model">How it works</a> &#183; <a href="/strategy-lab.html">Strategy Lab</a> &#183; <a href="/api/docs">API</a></span></div></footer>
+<footer class="site-footer"><div class="wrap"><span id="sourceNote">Research tooling only &#8212; not financial advice or a production trading system.</span><span><a href="#model">How it works</a> &#183; <a href="/strategy-lab.html">Strategy Lab</a> &#183; <a href="#benchmarks">Benchmarks</a> &#183; <a href="/api/docs">API</a></span></div></footer>
 <script>
 const $ = selector => document.querySelector(selector);
 const state = { results:null, comparison:null, tradingSetup:new URLSearchParams(location.search).get('setup')==='prop'?'prop':'battery', dirty:false, savedComparisons:new Map(), requestCache:new Map() };
