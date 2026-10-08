@@ -226,8 +226,8 @@
 
         <div class="sl-runs">
           <div class="sl-runs-head"><span class="sl-label">Compare runs at the same replay time</span><label class="visually-hidden" for="replayRun">Inspect strategy run</label><select id="replayRun"></select></div>
-          <div class="table-wrap"><table><thead><tr><th>Run</th><th>Signal</th><th>Strength</th><th>Position</th><th>P&amp;L DKK</th></tr></thead><tbody id="replayComparisons"></tbody></table></div>
-          <p class="sl-note">Strength is the distance from the midpoint of your thresholds: +100% reaches the long threshold, &#8722;100% the short one. It is not a probability. Up to five runs stay in this tab; changing the test period starts a new comparison.</p>
+          <div class="table-wrap"><table id="replayRunsTable"><thead><tr><th>Run</th><th>Signal</th><th>Strength</th><th>Position</th><th data-window="96">P&amp;L &#183; 24 h</th><th data-window="672">P&amp;L &#183; 7 days</th><th data-window="all">P&amp;L &#183; whole test</th></tr></thead><tbody id="replayComparisons"></tbody></table></div>
+          <p class="sl-note">P&amp;L columns are in DKK after costs, each ending at the replay time; the highlighted one matches the chart window. Strength is the distance from the midpoint of your thresholds: +100% reaches the long threshold, &#8722;100% the short one. It is not a probability. Up to five runs stay in this tab; changing the test period starts a new comparison.</p>
         </div>
       </div>
     </div>
@@ -235,9 +235,9 @@
 
   <section class="section results-section" aria-label="Custom backtest results">
     <div class="wrap">
-      <div class="result-heading"><div><span class="kicker">Backtest results</span><h2 class="display" id="labResultTitle">Waiting for the first run</h2><p id="labPeriod"></p></div><button type="button" class="btn btn-outline" id="labExport">Download results CSV</button></div>
+      <div class="result-heading"><div><span class="kicker">Backtest results</span><h2 class="display" id="labResultTitle">Waiting for the first run</h2><p id="labPeriod"></p><p class="window-note" id="labWindow"></p></div><button type="button" class="btn btn-outline" id="labExport">Download results CSV</button></div>
       <div id="labResults" hidden>
-        <div class="metrics"><article><span>Net cashflow &#183; DKK</span><strong id="labPnl">&#8212;</strong><small>Through replay time, after costs</small></article><article><span>Maximum drawdown &#183; DKK</span><strong id="labDrawdown">&#8212;</strong><small>Through replay time</small></article><article><span>Active intervals</span><strong id="labActive">&#8212;</strong><small id="labWarmup"></small></article><article><span id="labLastLabel">Final stored energy &#183; MWh</span><strong id="labLast">&#8212;</strong><small id="labLastNote"></small></article></div>
+        <div class="metrics"><article><span>Net cashflow &#183; DKK</span><strong id="labPnl">&#8212;</strong><small id="labPnlNote">Through replay time, after costs</small></article><article><span>Maximum drawdown &#183; DKK</span><strong id="labDrawdown">&#8212;</strong><small id="labDrawdownNote">Through replay time</small></article><article><span>Active intervals</span><strong id="labActive">&#8212;</strong><small id="labWarmup"></small></article><article><span id="labLastLabel">Final stored energy &#183; MWh</span><strong id="labLast">&#8212;</strong><small id="labLastNote"></small></article></div>
         <article class="card log"><div class="card-head"><h3>Signal &amp; execution log</h3><p><span id="labLogCount"></span> <span class="positive">Long</span> / <span class="negative">Short</span>. Other intervals are collapsed below.</p></div><div class="table-wrap"><table><thead><tr><th>Time &#183; UTC</th><th>Signal</th><th>Requested</th><th>Executed</th><th>Cashflow &#183; DKK</th><th>Cumulative &#183; DKK</th></tr></thead><tbody id="labRows"></tbody></table></div><p id="labNoTrades" hidden>No executed positions through this replay time.</p><details id="labOtherIntervals" class="help-details"><summary id="labOtherCount">Other intervals</summary><div class="table-wrap"><table><thead><tr><th>Time &#183; UTC</th><th>Signal</th><th>Requested</th><th>Executed</th><th>Cashflow &#183; DKK</th><th>Cumulative &#183; DKK</th></tr></thead><tbody id="labOtherRows"></tbody></table></div></details></article>
       </div>
     </div>

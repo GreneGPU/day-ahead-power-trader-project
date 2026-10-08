@@ -127,14 +127,27 @@
     el('replayNetCashflow').textContent=format(netCashflow);
     el('replayNetCashflow').className=netCashflow>0?'positive':netCashflow<0?'negative':'';
     const body=el('replayComparisons');body.replaceChildren();
+    const current=el('chartWindow').value;
+    el('replayRunsTable').querySelectorAll('th[data-window]').forEach(th=>th.classList.toggle('is-window',th.dataset.window===current));
     runs.forEach((run,i)=>{
       const interval=run.intervals[replayCursor-1], strength=interval?ReplayMath.strength(interval.Custom_Signal,run.settings):null;
       const tr=document.createElement('tr');
-      for(const value of [`#${run.runId} ${run.name}`,interval?format(interval.Custom_Signal):'-',strength==null?'-':`${format(strength)}%`,positionName(interval?.Position||0)+(interval?.Size_Multiplier>1?` ${format(interval.Size_Multiplier)}×`:''),format(interval?.Cumulative_Cashflow||0)]){
+      for(const value of [`#${run.runId} ${run.name}`,interval?format(interval.Custom_Signal):'-',strength==null?'-':`${format(strength)}%`,positionName(interval?.Position||0)+(interval?.Size_Multiplier>1?` ${format(interval.Size_Multiplier)}×`:'')]){
         const td=document.createElement('td');td.textContent=value;tr.append(td);
+      }
+      for(const [key] of chartWindows){
+        const td=document.createElement('td'),pnl=periodPnl(run,spanOf(key));
+        td.textContent=format(pnl);td.className=(pnl>0?'positive':pnl<0?'negative':'')+(key===current?' is-window':'');tr.append(td);
       }
       tr.firstChild.style.color=runColors[i];body.append(tr);
     });
+  }
+  // Chart windows double as reporting periods: rolling 24 hours, 7 days, or the whole test, ending at the replay time.
+  const chartWindows=[['96','last 24 hours'],['672','last 7 days'],['all','whole test']];
+  function spanOf(key) {return key==='all'?Infinity:Number(key);}
+  function periodPnl(run,span) {
+    const end=run.intervals[replayCursor-1]?.Cumulative_Cashflow||0, before=replayCursor-1-span;
+    return end-(Number.isFinite(span)&&before>=0?run.intervals[before].Cumulative_Cashflow:0);
   }
   let records = null, result = null, busy = false, readingFile = false;
   function status(text, error = false) { el('labStatus').textContent = text; el('labStatus').className = error ? 'error' : ''; }
@@ -327,7 +340,10 @@
   }
   function render() {
     const shown=result.intervals.slice(0,replayCursor);
-    const s=ReplayMath.stats(shown,result.settings.prop.initial_capital_dkk), prop=true;
+    // Results cover the chart window (e.g. the last 7 days) ending at the replay time.
+    const windowKey=el('chartWindow').value, span=spanOf(windowKey), windowName=chartWindows.find(([key])=>key===windowKey)[1];
+    const windowed=Number.isFinite(span)?shown.slice(-span):shown;
+    const s=ReplayMath.stats(windowed,result.settings.prop.initial_capital_dkk), prop=true;
     renderReplay();
     el('replayWorkspace').hidden=false;
     el('labResults').hidden=false; el('labResults').classList.remove('stale'); el('labExport').disabled=false;
@@ -340,13 +356,18 @@
     el('labDrawdown').textContent=format(s.max_drawdown); el('labActive').textContent=format(s.active_intervals);
     el('labWarmup').textContent=`${s.warmup_intervals} warm-up holds · fees ${format(s.total_fee_cost)} DKK`;
     el('labLastLabel').textContent=prop?'Ending equity · DKK':'Final stored energy · MWh';
-    el('labLast').textContent=format(prop?s.ending_equity_dkk:s.final_soc_mwh);
-    el('labLastNote').textContent='Through completed replay intervals';
+    el('labLast').textContent=format(prop?(shown.at(-1)?.Equity_DKK??result.settings.prop.initial_capital_dkk):s.final_soc_mwh);
+    el('labLastNote').textContent='Whole test through replay time';
+    const label=windowName[0].toUpperCase()+windowName.slice(1);
+    el('labPnlNote').textContent=`${label}, after costs`; el('labDrawdownNote').textContent=label;
+    el('labWindow').textContent=windowed.length
+      ? `Showing the ${windowName} through the replay time: ${windowed[0].HourUTC.slice(0,16).replace('T',' ')} – ${windowed.at(-1).HourUTC.slice(0,16).replace('T',' ')} UTC · ${windowed.length.toLocaleString()} intervals. Change the chart window to switch period.`
+      : 'No intervals completed yet.';
     const body=el('labRows'), otherBody=el('labOtherRows'); body.replaceChildren(); otherBody.replaceChildren();
     const fragment=document.createDocumentFragment(), otherFragment=document.createDocumentFragment();
     let visibleCount=0, otherCount=0;
 
-    for (const row of shown) {
+    for (const row of windowed) {
       const tr=document.createElement('tr');
       const requested = prop ? ({charge:'long',discharge:'short',hold:'flat'}[row.Signal_Action] || row.Signal_Action) : row.Signal_Action;
       for(const value of [row.HourUTC.replace('T',' ').replace('.000Z',''),format(row.Custom_Signal),requested,row.Action,format(row.Cashflow),format(row.Cumulative_Cashflow)]) {
@@ -462,7 +483,7 @@
   el('editSizing').addEventListener('click',()=>{
     pauseReplay();el('strategyEditor').open=true;el('strategyEditor').scrollIntoView({behavior:'auto',block:'start'});el('labSizing').focus({preventScroll:true});
   });
-  el('chartWindow').addEventListener('change',()=>drawSignal());
+  el('chartWindow').addEventListener('change',()=>{if(result)render();});
   el('signalCanvas').addEventListener('mousemove',event=>{
     const bounds=el('signalCanvas').getBoundingClientRect();drawSignal((event.clientX-bounds.left-65)/(bounds.width-81));
   });
