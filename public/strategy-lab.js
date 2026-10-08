@@ -3,7 +3,7 @@
   const el = id => document.getElementById(id);
   const number = id => Number(el(id).value);
   const format = value => value == null ? '—' : Number(value).toLocaleString('en-DK', {maximumFractionDigits: 2});
-  const fields = ['labFormula','labName','labSignal','labForecast','labLookback','labDirection','labLower','labUpper','labEvaluation','labSetup','labCapacity','labPower','labEfficiency','labChargeFee','labSellFee','labCapital','labPosition','labCost','labLoss'];
+  const fields = ['labFormula','labName','labSignal','labForecast','labLookback','labDirection','labLower','labUpper','labSizing','labOuterLower','labOuterUpper','labMaxSize','labEvaluation','labSetup','labCapacity','labPower','labEfficiency','labChargeFee','labSellFee','labCapital','labPosition','labCost','labLoss'];
   let fundamentals = null;
   let initialReplay = true;
   let replayCursor = 0, replayTimer = null, runSerial = 0;
@@ -16,6 +16,8 @@
   // buy_low: long when signal <= lower, short when signal >= upper; buy_high is the mirror image.
   const presets = [
     {tag:'Daily shape',name:'Cheapest 20% / priciest 20%',desc:'Long the day’s 20% lowest-forecast intervals, short the 20% highest.',formula:'signal = forecast_rank',direction:'buy_low',lower:20,upper:80},
+    {tag:'Dynamic sizing',name:'20% / 20% · 2× in the extreme 5%',desc:'Same trades, but the day’s cheapest and priciest 5% get double size.',formula:'signal = forecast_rank',direction:'buy_low',lower:20,upper:80,sizing:'step',outerLower:5,outerUpper:95,maxSize:2},
+    {tag:'Dynamic sizing',name:'20% / 20% · scaled up to 3×',desc:'Size grows linearly from 1× at the 20% line to 3× at the day’s extreme.',formula:'signal = forecast_rank',direction:'buy_low',lower:20,upper:80,sizing:'scaled',outerLower:0,outerUpper:100,maxSize:3},
     {tag:'Daily shape',name:'Extremes only · 10% / 10%',desc:'Trade only the day’s most extreme forecast prices.',formula:'signal = forecast_rank',direction:'buy_low',lower:10,upper:90},
     {tag:'Daily shape',name:'Wide-spread days only',desc:'Cheapest/priciest 20%, but only on days whose forecast spread exceeds 600 DKK.',formula:'signal = 50 + (forecast_rank - 50) * clamp((forecast_spread - 600) * 1000, 0, 1)',direction:'buy_low',lower:20,upper:80},
     {tag:'Daily shape',name:'Daily z-score reversion',desc:'Long when the forecast is 1σ below its daily mean, short 1σ above.',formula:'signal = forecast_z',direction:'buy_low',lower:-1,upper:1},
@@ -28,7 +30,14 @@
   ];
   function presetRule(p) {
     const low=p.direction==='buy_low';
-    return `${(p.formula||'signal = forecast change, 1h').replace(/^signal = /,'')} · long ${low?'≤':'≥'} ${low?p.lower:p.upper} · short ${low?'≥':'≤'} ${low?p.upper:p.lower}`;
+    const sizing=p.sizing==='step'?` · ${p.maxSize}× beyond ${p.outerLower}/${p.outerUpper}`:p.sizing==='scaled'?` · up to ${p.maxSize}× at ${p.outerLower}/${p.outerUpper}`:'';
+    return `${(p.formula||'signal = forecast change, 1h').replace(/^signal = /,'')} · long ${low?'≤':'≥'} ${low?p.lower:p.upper} · short ${low?'≥':'≤'} ${low?p.upper:p.lower}${sizing}`;
+  }
+  function sizeSummary() {
+    const size=format(number('labPosition')), sizing=el('labSizing').value, max=format(number('labMaxSize'));
+    if(sizing==='fixed')return `size = ${size} MWh · fixed`;
+    const outer=`${el('labOuterLower').value} / ${el('labOuterUpper').value}`;
+    return sizing==='step'?`size = ${size} MWh · ${max}× beyond ${outer}`:`size = ${size} MWh · scales to ${max}× at ${outer}`;
   }
   function buildLibrary() {
     el('strategyLibrary').replaceChildren(...presets.map((p,i)=>{
@@ -43,7 +52,9 @@
     const signal=p.signal||'formula';
     return el('labSignal').value===signal && (signal!=='formula'||el('labFormula').value.trim()===p.formula)
       && (signal!=='forecast_change'||number('labLookback')===p.lookback)
-      && el('labDirection').value===p.direction && number('labLower')===p.lower && number('labUpper')===p.upper;
+      && el('labDirection').value===p.direction && number('labLower')===p.lower && number('labUpper')===p.upper
+      && el('labSizing').value===(p.sizing||'fixed')
+      && (!p.sizing||(number('labOuterLower')===p.outerLower&&number('labOuterUpper')===p.outerUpper&&number('labMaxSize')===p.maxSize));
   }
   function applyPreset(p) {
     if(busy||readingFile)return;
@@ -51,6 +62,8 @@
     if(p.formula)el('labFormula').value=p.formula;
     if(p.lookback)el('labLookback').value=p.lookback;
     el('labName').value=p.name; el('labDirection').value=p.direction; el('labLower').value=p.lower; el('labUpper').value=p.upper;
+    el('labSizing').value=p.sizing||'fixed';
+    if(p.sizing){el('labOuterLower').value=p.outerLower;el('labOuterUpper').value=p.outerUpper;el('labMaxSize').value=p.maxSize;}
     updateFields(); dirty(); initialReplay=true; el('labForm').requestSubmit();
   }
   function compact(value) {return value==null||!Number.isFinite(value)?'—':Number(value).toLocaleString('en-DK',{maximumFractionDigits:Math.abs(value)>=100?0:2});}
@@ -107,7 +120,7 @@
     el('replayStrength').className=strength>=100?'positive':strength<=-100?'negative':'';
     el('replayPosition').textContent=positionName(row?.Position||0);
     el('replayPosition').className=row?.Position>0?'positive':row?.Position<0?'negative':'';
-    el('replayExposure').textContent=row?`${format(row.Position_MWh)} MWh`:'0 MWh';
+    el('replayExposure').textContent=row?`${format(row.Position_MWh)} MWh${row.Size_Multiplier>1?` · ${format(row.Size_Multiplier)}×`:''}`:'0 MWh';
     el('replayAfter').textContent=positionName(row?.Position_After_Settlement||0);
     const netCashflow=row?.Cumulative_Cashflow||0;
     el('replayNetCashflow').textContent=format(netCashflow);
@@ -116,7 +129,7 @@
     runs.forEach((run,i)=>{
       const interval=run.intervals[replayCursor-1], strength=interval?ReplayMath.strength(interval.Custom_Signal,run.settings):null;
       const tr=document.createElement('tr');
-      for(const value of [`#${run.runId} ${run.name}`,interval?format(interval.Custom_Signal):'-',strength==null?'-':`${format(strength)}%`,positionName(interval?.Position||0),format(interval?.Cumulative_Cashflow||0)]){
+      for(const value of [`#${run.runId} ${run.name}`,interval?format(interval.Custom_Signal):'-',strength==null?'-':`${format(strength)}%`,positionName(interval?.Position||0)+(interval?.Size_Multiplier>1?` ${format(interval.Size_Multiplier)}×`:''),format(interval?.Cumulative_Cashflow||0)]){
         const td=document.createElement('td');td.textContent=value;tr.append(td);
       }
       tr.firstChild.style.color=runColors[i];body.append(tr);
@@ -141,7 +154,9 @@
     el('labCsvFields').hidden = !csv; el('labForecastFields').hidden = csv;
     el('labLookbackFields').hidden = !change;
     el('labBatteryFields').hidden = prop; el('labPropFields').hidden = !prop;
-    for (const id of ['labBatteryFields','labPropFields','labForecastFields','labLookbackFields','labCsvFields','labFormulaFields','labFormulaExtras']) {
+    el('labSizingFields').hidden = el('labSizing').value === 'fixed';
+    el('labSizeSummary').textContent = sizeSummary();
+    for (const id of ['labBatteryFields','labPropFields','labForecastFields','labLookbackFields','labCsvFields','labFormulaFields','labFormulaExtras','labSizingFields']) {
       el(id).querySelectorAll('input,select,textarea,button').forEach(input => { input.disabled = busy || el(id).hidden; });
     }
     const buy = prop ? 'long' : 'charge', sell = prop ? 'short' : 'discharge';
@@ -204,8 +219,12 @@
   function request() {
     if (number('labLower') >= number('labUpper')) throw new Error('Lower threshold must be below upper threshold.');
     if (el('labSignal').value === 'csv' && !records) throw new Error('Upload a valid signal CSV first.');
+    const sizing = el('labSizing').value;
+    if (sizing !== 'fixed' && !(number('labOuterLower') < number('labLower') && number('labUpper') < number('labOuterUpper')))
+      throw new Error('Outer thresholds must lie beyond the entry thresholds: outer lower < lower and outer upper > upper.');
     const efficiency = Math.sqrt(number('labEfficiency') / 100);
     return {
+      sizing, ...(sizing === 'fixed' ? {} : {outer_lower:number('labOuterLower'), outer_upper:number('labOuterUpper'), max_multiplier:number('labMaxSize')}),
       name:el('labName').value.trim() || 'Custom strategy', trading_setup:el('labSetup').value,
       forecast_col:el('labForecast').value, signal:el('labSignal').value,
       formula:el('labSignal').value === 'formula' ? el('labFormula').value : 'signal = -wind', fundamental_records:el('labSignal').value === 'formula' ? fundamentals : null,
@@ -264,7 +283,9 @@
     const priceY=value=>priceBottom-(value-priceMin)/(priceMax-priceMin)*(priceBottom-top);
     const signalY=value=>bottom-(value-signalMin)/(signalMax-signalMin)*(bottom-signalTop);
     rows.forEach((row,i)=>{
-      ctx.fillStyle=row.Position>0?'rgba(79,224,176,.13)':row.Position<0?'rgba(255,143,171,.13)':'rgba(255,255,255,0)';
+      // Shading deepens with position size, so sized-up intervals stand out.
+      const alpha=Math.min(.42,.13*(row.Size_Multiplier||1));
+      ctx.fillStyle=row.Position>0?`rgba(79,224,176,${alpha})`:row.Position<0?`rgba(255,143,171,${alpha})`:'rgba(255,255,255,0)';
       const band=width/rows.length;ctx.fillRect(left+i*band,top,band,priceBottom-top);ctx.fillRect(left+i*band,signalTop,band,bottom-signalTop);
     });
     ctx.strokeStyle='#243159';ctx.lineWidth=1;
@@ -417,6 +438,9 @@
   window.addEventListener('pagehide',pauseReplay);
   el('editSignal').addEventListener('click',()=>{
     pauseReplay();el('strategyEditor').open=true;el('strategyEditor').scrollIntoView({behavior:'auto',block:'start'});el('labLower').focus({preventScroll:true});
+  });
+  el('editSizing').addEventListener('click',()=>{
+    pauseReplay();el('strategyEditor').open=true;el('strategyEditor').scrollIntoView({behavior:'auto',block:'start'});el('labSizing').focus({preventScroll:true});
   });
   el('signalCanvas').addEventListener('mousemove',event=>{
     const bounds=el('signalCanvas').getBoundingClientRect();drawSignal((event.clientX-bounds.left-65)/(bounds.width-81));

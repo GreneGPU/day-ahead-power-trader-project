@@ -225,6 +225,56 @@ def test_cheapest_and_priciest_fifth_preset_trades_each_day():
     assert counts['charge'].between(18, 22).all() and counts['discharge'].between(18, 22).all()
 
 
+def test_size_multipliers_step_and_scaled():
+    from intraday_power_quant.custom_strategy import size_multipliers
+    signal = pd.Series([50., 20., 12.5, 5., 0., 87.5, 100., np.nan])
+    base = dict(lower=20, upper=80, outer_lower=5, outer_upper=95, max_multiplier=3, trading_setup='prop')
+    scaled = size_multipliers(signal, CustomStrategyRequest(sizing='scaled', **base))
+    assert scaled.tolist() == pytest.approx([1, 1, 2, 3, 3, 2, 3, 1])
+    step = size_multipliers(signal, CustomStrategyRequest(sizing='step', **base))
+    assert step.tolist() == pytest.approx([1, 1, 1, 3, 3, 1, 3, 1])
+    assert size_multipliers(signal, CustomStrategyRequest(**base)).eq(1).all()
+
+
+def test_prop_simulator_charges_turnover_on_size_changes():
+    from intraday_power_quant.prop_trading import PropConfig, simulate_prop_positions_with_eod_imbalance
+    frame = pd.DataFrame({
+        'HourUTC': pd.date_range('2026-01-05 08:00', periods=4, freq='15min', tz='UTC'),
+        'Actual_Price': [100., 110., 105., 120.], 'Imbalance_Price_DKK': [0., 0., 0., 0.],
+        'Signal_Action': ['charge', 'charge', 'discharge', 'hold'], 'Size_Multiplier': [1., 2., 1., 1.]})
+    # The last row ends the day but is flat, so no imbalance settlement applies.
+    out, summary = simulate_prop_positions_with_eod_imbalance(frame, PropConfig(position_size_mwh=10, transaction_cost_dkk_per_mwh=1))
+    assert out['Position_MWh'].tolist() == [10, 20, -10, 0]
+    assert out['Size_Multiplier'].tolist() == [1, 2, 1, 0]
+    assert out['Transaction_Cost'].tolist() == [10, 10, 30, 10]
+    assert out['Gross_Cashflow'].tolist() == [100, -100, -150, 0]
+    assert summary['average_size_multiplier'] == pytest.approx(4 / 3)
+    assert summary['max_position_mwh'] == 20
+
+
+def test_sized_preset_doubles_exposure_in_the_extreme_tails():
+    response = client.post('/api/custom-strategy', json={
+        'signal': 'formula', 'formula': 'signal = forecast_rank', 'direction': 'buy_low', 'lower': 20, 'upper': 80,
+        'trading_setup': 'prop', 'sizing': 'step', 'outer_lower': 5, 'outer_upper': 95, 'max_multiplier': 2})
+    assert response.status_code == 200, response.text
+    rows = pd.DataFrame(response.json()['intervals'])
+    held = rows[rows['Position'] != 0]
+    extreme = (held['Custom_Signal'] <= 5) | (held['Custom_Signal'] >= 95)
+    assert extreme.any() and (~extreme).any()
+    assert (held.loc[extreme, 'Position_MWh'].abs() == 20).all()
+    assert (held.loc[~extreme, 'Position_MWh'].abs() == 10).all()
+
+
+@pytest.mark.parametrize('extra', [
+    {'sizing': 'step', 'outer_lower': 25, 'outer_upper': 95},
+    {'sizing': 'scaled'},
+    {'sizing': 'step', 'outer_lower': 5, 'outer_upper': 95, 'trading_setup': 'battery'},
+])
+def test_dynamic_sizing_validation(extra):
+    payload = {'signal': 'formula', 'formula': 'signal = forecast_rank', 'lower': 20, 'upper': 80, 'trading_setup': 'prop', **extra}
+    assert client.post('/api/custom-strategy', json=payload).status_code == 422
+
+
 def test_replay_factors_align_with_intervals():
     from api.index import _load_deployment_results
     frame, _, _ = _load_deployment_results()

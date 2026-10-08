@@ -149,6 +149,9 @@ def simulate_prop_positions_with_eod_imbalance(
     Intraday positions earn the next observed day-ahead price move. On the final
     interval of each market day, a remaining position instead settles against the
     realized imbalance spread and is then forced flat before the next day.
+
+    An optional ``Size_Multiplier`` column scales each interval's exposure
+    (``Position`` stays the -1/0/1 direction); turnover costs follow the change in MWh.
     """
 
     cfg = config or PropConfig()
@@ -164,6 +167,13 @@ def simulate_prop_positions_with_eod_imbalance(
     out = out.sort_values(time_col).reset_index(drop=True)
     signal = out[signal_col].astype(str).str.lower()
     requested_positions = signal.map({"charge": 1, "discharge": -1}).fillna(0).astype(int)
+    multipliers = (
+        out["Size_Multiplier"].astype(float).fillna(1.0)
+        if "Size_Multiplier" in out.columns
+        else pd.Series(1.0, index=out.index)
+    )
+    if (multipliers <= 0).any():
+        raise ValueError("Size multipliers must be positive.")
     actual_price = out[actual_col].astype(float)
     imbalance_price = out[imbalance_col].astype(float)
     next_price_change = (actual_price.shift(-1) - actual_price).fillna(0.0)
@@ -172,6 +182,7 @@ def simulate_prop_positions_with_eod_imbalance(
     is_day_end = local_dates.ne(local_dates.shift(-1)).fillna(True)
     daily_cashflow: dict[object, float] = {}
     previous_position = 0
+    previous_exposure_mwh = 0.0
     position_change_events = 0
     rows: list[dict[str, float | int | str | bool]] = []
 
@@ -189,13 +200,14 @@ def simulate_prop_positions_with_eod_imbalance(
             if settles_at_imbalance
             else float(next_price_change.iloc[index])
         )
-        opening_turnover_mwh = abs(position - previous_position) * cfg.position_size_mwh
-        closing_turnover_mwh = cfg.position_size_mwh * abs(position) if settles_at_imbalance else 0.0
-        position_change_events += int(position != previous_position) + int(settles_at_imbalance)
+        exposure_mwh = position * cfg.position_size_mwh * float(multipliers.iloc[index])
+        opening_turnover_mwh = abs(exposure_mwh - previous_exposure_mwh)
+        closing_turnover_mwh = abs(exposure_mwh) if settles_at_imbalance else 0.0
+        position_change_events += int(exposure_mwh != previous_exposure_mwh) + int(settles_at_imbalance)
         transaction_cost = (
             opening_turnover_mwh + closing_turnover_mwh
         ) * cfg.transaction_cost_dkk_per_mwh
-        gross_cashflow = position * price_move * cfg.position_size_mwh
+        gross_cashflow = exposure_mwh * price_move
         cashflow = gross_cashflow - transaction_cost
         daily_cashflow[date_key] += cashflow
         position_after_settlement = 0 if bool(is_day_end.iloc[index]) else position
@@ -218,7 +230,8 @@ def simulate_prop_positions_with_eod_imbalance(
             {
                 "Requested_Position": int(requested_position),
                 "Position": position,
-                "Position_MWh": position * cfg.position_size_mwh,
+                "Position_MWh": exposure_mwh,
+                "Size_Multiplier": float(multipliers.iloc[index]) if position else 0.0,
                 "Position_After_Settlement": position_after_settlement,
                 "Day_Ahead_Price_DKK": float(actual_price.iloc[index]),
                 "Imbalance_Spread_DKK": float(imbalance_spread.iloc[index]),
@@ -234,6 +247,7 @@ def simulate_prop_positions_with_eod_imbalance(
             }
         )
         previous_position = position_after_settlement
+        previous_exposure_mwh = 0.0 if bool(is_day_end.iloc[index]) else exposure_mwh
 
     accounting = pd.DataFrame(rows, index=out.index)
     for column in accounting.columns:
@@ -257,6 +271,8 @@ def simulate_prop_positions_with_eod_imbalance(
         "long_intervals": int((out["Position"] > 0).sum()),
         "short_intervals": int((out["Position"] < 0).sum()),
         "eod_imbalance_settlements": eod_closes,
+        "average_size_multiplier": float(out.loc[active, "Size_Multiplier"].mean()) if active.any() else 0.0,
+        "max_position_mwh": float(out["Position_MWh"].abs().max()),
         "energy_charged_mwh": 0.0,
         "energy_discharged_mwh": 0.0,
         "total_fee_cost": float(out["Transaction_Cost"].sum()),

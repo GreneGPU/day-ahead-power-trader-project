@@ -82,11 +82,24 @@ class CustomStrategyRequest(StrictModel):
     battery: CustomBattery = Field(default_factory=CustomBattery)
     prop: CustomProp = Field(default_factory=CustomProp)
     signal_records: list[SignalRecord] | None = Field(default=None, max_length=20000)
+    # Dynamic sizing (Prop only): beyond the entry thresholds, size grows towards max_multiplier at the
+    # outer thresholds — in one jump ("step") or linearly ("scaled").
+    sizing: Literal["fixed", "step", "scaled"] = "fixed"
+    outer_lower: float | None = Field(default=None, ge=-1e6, le=1e6)
+    outer_upper: float | None = Field(default=None, ge=-1e6, le=1e6)
+    max_multiplier: float = Field(default=2.0, gt=1, le=10)
 
     @model_validator(mode="after")
     def consistent_rules(self):
         if self.lower >= self.upper:
             raise ValueError("Lower threshold must be below upper threshold.")
+        if self.sizing != "fixed":
+            if self.trading_setup != "prop":
+                raise ValueError("Dynamic sizing is available for the Prop proxy only.")
+            if self.outer_lower is None or self.outer_upper is None:
+                raise ValueError("Dynamic sizing needs outer lower and upper thresholds.")
+            if not (self.outer_lower < self.lower and self.upper < self.outer_upper):
+                raise ValueError("Outer thresholds must lie beyond the entry thresholds: outer lower < lower and outer upper > upper.")
         if self.signal == "csv" and not self.signal_records:
             raise ValueError("Upload a CSV with HourUTC and Signal columns first.")
         if self.signal != "csv" and self.signal_records is not None:
@@ -117,6 +130,21 @@ def daily_forecast_features(times: pd.Series, forecast: pd.Series) -> pd.DataFra
         "Forecast_Daily_Spread": grouped.transform("max") - grouped.transform("min"),
         "Local_Hour": local.dt.hour + local.dt.minute / 60,
     }, index=forecast.index)
+
+
+def size_multipliers(signal: pd.Series, request: CustomStrategyRequest) -> pd.Series:
+    """Position-size multiplier per interval: 1 at the entry threshold, max_multiplier at or beyond the outer one."""
+    if request.sizing == "fixed":
+        return pd.Series(1.0, index=signal.index)
+    # Depth into each trade zone: 0 at the entry threshold, 1 at the outer threshold. Both sides are symmetric,
+    # whichever of them is the long side for the chosen direction.
+    low_depth = (request.lower - signal) / (request.lower - request.outer_lower)
+    high_depth = (signal - request.upper) / (request.outer_upper - request.upper)
+    depth = pd.Series(np.where(signal <= request.lower, low_depth, np.where(signal >= request.upper, high_depth, 0.0)),
+                      index=signal.index).fillna(0.0).clip(0.0, 1.0)
+    if request.sizing == "step":
+        depth = (depth >= 1.0).astype(float)
+    return 1.0 + (request.max_multiplier - 1.0) * depth
 
 
 def prepare_custom_signals(history: pd.DataFrame, request: CustomStrategyRequest) -> pd.DataFrame:
@@ -176,6 +204,7 @@ def run_custom_strategy(frame: pd.DataFrame, request: CustomStrategyRequest):
     else:
         frame = frame.copy()
         frame["Signal_Action"] = frame["Requested_Action"]
+        frame["Size_Multiplier"] = size_multipliers(frame["Custom_Signal"], request)
         intervals, summary = simulate_prop_positions_with_eod_imbalance(
             frame, PropConfig(**request.prop.model_dump()),
         )

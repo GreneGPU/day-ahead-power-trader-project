@@ -66,7 +66,7 @@
       <div class="band-stats">
         <div><strong id="statIntervals">&#8212;</strong><span>saved 15-minute prediction intervals</span></div>
         <div><strong id="statMae">&#8212;</strong><span id="statMaeLabel">forecast MAE &#183; EUR/MWh</span></div>
-        <div><strong id="statStrategies">10</strong><span>ready-made strategies to press</span></div>
+        <div><strong id="statStrategies">12</strong><span>ready-made strategies to press</span></div>
         <div><strong id="statDays">10</strong><span id="statDaysLabel">complete DK1 days in each replay</span></div>
       </div>
     </div>
@@ -152,7 +152,7 @@
     <div class="wrap">
       <div class="section-head">
         <span class="kicker">02 / Strategy Lab</span>
-        <div><h2 class="display" id="lab-title">Your idea, tested on real DK1 prices. <span class="soft">Press a ready-made strategy &#8212; like long the day&#8217;s cheapest 20% and short the priciest 20% &#8212; or code your own, then replay it one 15-minute interval at a time.</span></h2></div>
+        <div><h2 class="display" id="lab-title">Your idea, tested on real DK1 prices. <span class="soft">Press a ready-made strategy &#8212; like long the day&#8217;s cheapest 20% and short the priciest 20%, sized up in the extremes &#8212; or code your own, then replay it one 15-minute interval at a time.</span></h2></div>
       </div>
       <div class="signal-lab" id="replayWorkspace">
         <div class="sl-head">
@@ -204,6 +204,7 @@
           </div>
           <p class="code-line source-note" id="labSourceNote" hidden></p>
           <div class="code-line"><span class="ln" aria-hidden="true">02</span><code class="rule-code" id="labRuleSummary"></code><button type="button" class="code-link" id="editSignal">Edit thresholds &#8599;</button></div>
+          <div class="code-line"><span class="ln" aria-hidden="true">03</span><code class="rule-code" id="labSizeSummary"></code><button type="button" class="code-link" id="editSizing">Edit sizing &#8599;</button></div>
           <div class="code-foot">
             <span><span id="labStatus" role="status" aria-live="polite">Ready to test.</span> <span class="sl-replaying">Replaying: <code id="activeFormula">&#8212;</code> &#183; <span id="activeRule"></span></span></span>
             <button type="submit" class="sl-btn sl-btn-primary" id="labRun">Run backtest</button>
@@ -276,6 +277,12 @@
           <section class="card"><h3><span>02</span> Set the rules</h3>
             <label for="labDirection">Rule direction</label><select id="labDirection"><option value="buy_low" selected>Long low / short high</option><option value="buy_high">Long high / short low</option></select>
             <div class="pair"><div><label for="labLower">Lower threshold</label><input id="labLower" type="number" value="20" min="-1000000" max="1000000" step="any" required></div><div><label for="labUpper">Upper threshold</label><input id="labUpper" type="number" value="80" min="-1000000" max="1000000" step="any" required></div></div>
+            <label for="labSizing">Position sizing</label><select id="labSizing"><option value="fixed">Fixed size</option><option value="step">Step up beyond outer thresholds</option><option value="scaled">Scale up toward outer thresholds</option></select>
+            <div id="labSizingFields" hidden>
+              <div class="pair"><div><label for="labOuterLower">Outer lower threshold</label><input id="labOuterLower" type="number" value="5" min="-1000000" max="1000000" step="any" required></div><div><label for="labOuterUpper">Outer upper threshold</label><input id="labOuterUpper" type="number" value="95" min="-1000000" max="1000000" step="any" required></div></div>
+              <label for="labMaxSize">Maximum size &#183; &#215; position size</label><input id="labMaxSize" type="number" value="2" min="1.01" max="10" step="any" required>
+              <p>Size is 1&#215; at the entry thresholds and reaches the maximum at the outer thresholds. <strong>Step</strong> jumps straight to the maximum beyond them; <strong>scale</strong> ramps up linearly in between. Costs apply to every change in MWh, including resizing. Prop proxy only.</p>
+            </div>
             <label for="labEvaluation">Test period</label><select id="labEvaluation"><option value="last_10_days">Final 10 complete DK1 days</option><option value="full">Full saved dataset</option></select>
             <p>Repeated tuning on these dates is exploratory, not independent validation.</p>
           </section>
