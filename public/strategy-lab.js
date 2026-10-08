@@ -75,6 +75,13 @@
       delta.title=change==null?'':'Change since the previous 15-minute interval';
     }
   }
+  // Start the replay once the panel is on screen (it sits below the fold on the landing page).
+  function playWhenVisible() {
+    const start=()=>{if(result&&!replayTimer&&replayCursor===0)el('replayPlay').click();};
+    if(!('IntersectionObserver' in window)){start();return;}
+    const observer=new IntersectionObserver(entries=>{if(entries.some(entry=>entry.isIntersecting)){observer.disconnect();start();}},{rootMargin:'0px 0px -40% 0px'});
+    observer.observe(el('replayWorkspace'));
+  }
   function pauseReplay() {clearInterval(replayTimer);replayTimer=null;el('replayPlay').textContent='Play';}
   function addRun(data) {
     pauseReplay();
@@ -333,7 +340,7 @@
       el('replayLaunchStatus').hidden=true;
       if(initialReplay){initialReplay=false;autoplay=true;}
     }catch(error){status(error.message,true);if(!result){el('replayLaunchStatus').hidden=false;el('replayLaunchStatus').textContent='Replay could not load: '+error.message+' Adjust the formula below and press Run backtest.';}initialReplay=false;}
-    finally{busy=false;el('labForm').removeAttribute('aria-busy');el('labRun').textContent='Run backtest';el('labForm').querySelectorAll('input,select,textarea,button').forEach(input=>{input.disabled=false;});updateFields();if(autoplay)el('replayPlay').click();}
+    finally{busy=false;el('labForm').removeAttribute('aria-busy');el('labRun').textContent='Run backtest';el('labForm').querySelectorAll('input,select,textarea,button').forEach(input=>{input.disabled=false;});updateFields();if(autoplay)playWhenVisible();}
   });
   fields.forEach(id=>el(id).addEventListener('input',()=>{updateFields();dirty();}));
   el('labCsv').addEventListener('change',async()=>{
