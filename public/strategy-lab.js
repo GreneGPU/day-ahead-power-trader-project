@@ -360,6 +360,8 @@
     el('labLastNote').textContent='Whole test through replay time';
     const label=windowName[0].toUpperCase()+windowName.slice(1);
     el('labPnlNote').textContent=`${label}, after costs`; el('labDrawdownNote').textContent=label;
+    renderRisk(windowed, label);
+    renderRobustness();
     el('labWindow').textContent=windowed.length
       ? `Showing the ${windowName} through the replay time: ${windowed[0].HourUTC.slice(0,16).replace('T',' ')} – ${windowed.at(-1).HourUTC.slice(0,16).replace('T',' ')} UTC · ${windowed.length.toLocaleString()} intervals. Change the chart window to switch period.`
       : 'No intervals completed yet.';
@@ -388,6 +390,93 @@
     el('labNoTrades').hidden=visibleCount!==0;
     draw();
     renderPortfolio();
+  }
+
+  // ---- Risk & execution metrics over the chart window ----
+  function renderRisk(rows,label) {
+    let wins=0,active=0,gains=0,losses=0,turnover=0,gross=0,costs=0,previous=0,day=0;
+    const daily=[],hours=new Map();
+    for(const row of rows){
+      const cash=row.Cashflow||0,cost=row.Transaction_Cost||0,exposure=row.Position_MWh||0,dayEnd=Boolean(row.Is_Day_End);
+      if(row.Position){active++;if(cash>0)wins++;}
+      if(cash>0)gains+=cash;else losses-=cash;
+      turnover+=Math.abs(exposure-previous)+(dayEnd?Math.abs(exposure):0);previous=dayEnd?0:exposure;
+      costs+=cost;gross+=cash+cost;
+      const hour=row.HourUTC.slice(0,13);hours.set(hour,(hours.get(hour)||0)+cash);
+      day+=cash;if(dayEnd){daily.push(day);day=0;}
+    }
+    el('rkWin').textContent=active?`${format(wins/active*100)}%`:'—';
+    el('rkPf').textContent=losses>0?format(gains/losses):'—';
+    // Sharpe only over complete days; with few days it is a rough indication.
+    const sd=stdev(daily),mean=daily.reduce((a,b)=>a+b,0)/Math.max(1,daily.length);
+    el('rkSharpe').textContent=daily.length>=3&&sd>0?format(mean/sd*Math.sqrt(365)):'—';
+    el('rkSharpeNote').textContent=daily.length>=3?`From ${daily.length} daily P&L values · ${label.toLowerCase()}`:'Needs at least 3 complete days in the window';
+    const hourly=[...hours.values()].sort((a,b)=>a-b),tail=Math.max(1,Math.ceil(hourly.length*.05));
+    el('rkVar').textContent=hourly.length>=20?`${format(Math.max(0,-hourly[Math.floor(.05*(hourly.length-1))]))} / ${format(Math.max(0,-hourly.slice(0,tail).reduce((a,b)=>a+b,0)/tail))}`:'—';
+    const rate=result.settings.prop?.transaction_cost_dkk_per_mwh??0,breakeven=turnover>0?gross/turnover:null;
+    el('rkBreakeven').textContent=breakeven==null?'—':format(breakeven);
+    el('rkBreakeven').className=breakeven==null?'':breakeven>rate?'positive':'negative';
+    el('rkBreakevenNote').textContent=breakeven==null?'No trades in the window':breakeven>rate?`Now ${format(rate)} DKK/MWh · ${rate>0?`${format(breakeven/rate)}× headroom`:'no cost modeled'}`:`Above today’s ${format(rate)} DKK/MWh: costs eat the edge`;
+    el('rkTurnover').textContent=format(turnover);
+    el('rkCostNote').textContent=`Costs ${format(costs)} DKK · ${label.toLowerCase()}`;
+  }
+
+  // ---- Robustness: out-of-sample period and threshold sensitivity, fetched after each backtest ----
+  let robustShown=null;
+  async function runRobustness(run) {
+    run.robustness={status:'loading'};if(run===result)renderRobustness();
+    try{
+      const response=await fetch('/api/custom-strategy/robustness',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(run.request),signal:AbortSignal.timeout(60000)});
+      const data=await response.json();
+      if(!response.ok)throw new Error(typeof data.detail==='string'?data.detail:`Robustness check failed (${response.status}).`);
+      run.robustness={status:'ready',data};
+    }catch(error){run.robustness={status:'error',message:error.message};}
+    if(run===result)renderRobustness();
+  }
+  function renderRobustness() {
+    const state=result?.robustness;
+    if(state===robustShown)return; robustShown=state;
+    el('rbBody').hidden=state?.status!=='ready';
+    if(!state){el('rbStatus').textContent='Waiting for a backtest.';return;}
+    if(state.status==='loading'){el('rbStatus').textContent='Running robustness checks…';return;}
+    if(state.status==='error'){el('rbStatus').textContent=`Robustness checks unavailable: ${state.message}`;return;}
+    const {periods,grid}=state.data, settings=result.settings;
+    el('rbStatus').textContent=`${result.name} · thresholds ${format(settings.lower)} / ${format(settings.upper)}${settings.sizing&&settings.sizing!=='fixed'?` · ${settings.sizing} sizing`:''}`;
+    const body=el('rbPeriods');body.replaceChildren();
+    for(const [key,name] of [['earlier','Earlier period'],['final_10_days','Final 10 days']]){
+      const period=periods[key],tr=document.createElement('tr'),label=document.createElement('td');
+      label.textContent=name;
+      if(period&&!period.error){const small=document.createElement('small');small.textContent=` ${period.start.slice(5,10)} – ${period.end.slice(5,10)}`;small.className='rb-dates';label.append(small);}
+      tr.append(label);
+      const values=period?.error?[period.error,'','','','']:[period.days,format(period.total_cashflow),format(period.pnl_per_day),period.win_rate==null?'—':`${format(period.win_rate*100)}%`,format(period.max_drawdown)];
+      values.forEach((value,i)=>{const td=document.createElement('td');td.textContent=value;if((i===1||i===2)&&!period?.error)td.className=period.total_cashflow>0?'positive':period.total_cashflow<0?'negative':'';if(period?.error&&i===0)td.colSpan=5;if(!(period?.error&&i>0))tr.append(td);});
+      body.append(tr);
+    }
+    const early=periods.earlier,late=periods.final_10_days;
+    el('rbVerdict').textContent=early?.error||late?.error?'One period could not be evaluated with this rule.'
+      :late.pnl_per_day<=0?`Not profitable in the final 10 days (${format(late.pnl_per_day)} DKK/day); the earlier period made ${format(early.pnl_per_day)} DKK/day.`
+      :early.pnl_per_day<=0?`Loses money in the earlier period (${format(early.pnl_per_day)} DKK/day): the result on the final 10 days may be specific to those days.`
+      :`Profitable in both periods. The earlier ${early.days} days earned ${format(early.pnl_per_day)} DKK/day, ${Math.round(early.pnl_per_day/late.pnl_per_day*100)}% of the final period’s rate.`;
+    // Heatmap of P&L over nearby thresholds.
+    const table=el('rbHeatmap');table.replaceChildren();
+    const values=grid.pnl.flat().filter(v=>v!=null),maxAbs=Math.max(1,...values.map(Math.abs));
+    const head=document.createElement('tr'),corner=document.createElement('th');corner.textContent='lower ↓ upper →';head.append(corner);
+    grid.uppers.forEach(upper=>{const th=document.createElement('th');th.textContent=compact(upper);head.append(th);});
+    const thead=document.createElement('thead');thead.append(head);const tbody=document.createElement('tbody');
+    grid.lowers.forEach((lower,i)=>{
+      const tr=document.createElement('tr'),th=document.createElement('th');th.textContent=compact(lower);tr.append(th);
+      grid.pnl[i].forEach((value,j)=>{const td=document.createElement('td');td.textContent=value==null?'—':compact(value);
+        if(value!=null)td.style.background=value>=0?`rgba(11,138,94,${.06+.34*Math.abs(value)/maxAbs})`:`rgba(207,46,91,${.06+.34*Math.abs(value)/maxAbs})`;
+        if(i===2&&j===2){td.className='rb-self';td.title='Your rule';}tr.append(td);});
+      tbody.append(tr);
+    });
+    table.append(thead,tbody);
+    const centre=grid.pnl[2][2],neighbours=[];
+    for(let i=1;i<=3;i++)for(let j=1;j<=3;j++)if(!(i===2&&j===2)&&grid.pnl[i][j]!=null)neighbours.push(grid.pnl[i][j]);
+    const profitable=values.filter(v=>v>0).length,average=neighbours.reduce((a,b)=>a+b,0)/Math.max(1,neighbours.length);
+    el('rbPlateau').textContent=centre>0&&neighbours.length
+      ?`Thresholds one step away keep ${Math.round(average/centre*100)}% of your rule’s P&L on average; ${profitable} of ${values.length} settings in the grid are profitable.`
+      :`${profitable} of ${values.length} settings in the grid are profitable.`;
   }
 
   // ---- Portfolio: net the selected runs into one book and re-simulate it with the Prop proxy rules ----
@@ -541,7 +630,7 @@
       const response=await fetch('/api/custom-strategy',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload),signal:AbortSignal.timeout(60000)});
       const data=await response.json();
       if(!response.ok)throw new Error(Array.isArray(data.detail)?data.detail.map(item=>item.msg).join(' '):(data.detail || `Backtest failed (${response.status}).`));
-      addRun(data); render(); status('Compiled — the shaded columns are where the rule holds a position.');
+      data.request=payload; addRun(data); render(); runRobustness(data); status('Compiled — the shaded columns are where the rule holds a position.');
       el('replayLaunchStatus').hidden=true;
       if(initialReplay){initialReplay=false;autoplay=true;}
     }catch(error){status(error.message,true);if(!result){el('replayLaunchStatus').hidden=false;el('replayLaunchStatus').textContent='Replay could not load: '+error.message+' Adjust the formula below and press Run backtest.';}initialReplay=false;}

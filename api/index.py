@@ -21,7 +21,12 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from intraday_power_quant.optimization import optimize_strategy_suite, simulate_strategy_from_settings
-from intraday_power_quant.custom_strategy import CustomStrategyRequest, prepare_custom_signals, run_custom_strategy
+from intraday_power_quant.custom_strategy import (
+    CustomStrategyRequest,
+    prepare_custom_signals,
+    requested_actions,
+    run_custom_strategy,
+)
 from intraday_power_quant.latest_prices import latest_prices
 from intraday_power_quant.imbalance_trading import (
     simulate_imbalance_perfect_foresight,
@@ -362,6 +367,72 @@ def custom_strategy(payload: CustomStrategyRequest) -> dict[str, Any]:
         "settings": payload.model_dump(exclude={"signal_records", "fundamental_records"}),
         "intervals": _json_records(intervals[columns]),
         "factors": factors,
+    })
+
+
+def _period_summary(frame: pd.DataFrame, intervals: pd.DataFrame, summary: dict[str, Any]) -> dict[str, Any]:
+    days = pd.to_datetime(frame["HourUTC"], utc=True).dt.tz_convert("Europe/Copenhagen").dt.date.nunique()
+    active = intervals["Dispatch_MW"].abs() > 0
+    return {
+        "start": frame["HourUTC"].min().isoformat(), "end": frame["HourUTC"].max().isoformat(),
+        "days": int(days), "rows": len(frame),
+        "total_cashflow": summary["total_cashflow"], "pnl_per_day": summary["total_cashflow"] / max(days, 1),
+        "max_drawdown": summary["max_drawdown"], "active_intervals": int(active.sum()),
+        "win_rate": float((intervals.loc[active, "Cashflow"] > 0).mean()) if active.any() else None,
+    }
+
+
+@app.post("/api/custom-strategy/robustness")
+def custom_strategy_robustness(payload: CustomStrategyRequest) -> dict[str, Any]:
+    """Out-of-sample check (earlier period vs the final 10 days) and a threshold sensitivity grid."""
+    try:
+        history, _, _ = _load_deployment_results()
+        prepared = prepare_custom_signals(history, payload)
+        earlier, final = _split_complete_day_holdout(prepared, 10)
+    except (ValueError, TypeError, KeyError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    periods: dict[str, Any] = {}
+    # Lagged inputs can be missing at the very start of the history; drop only those leading rows.
+    finite = pd.Series(pd.to_numeric(earlier["Custom_Signal"], errors="coerce")).notna()
+    earlier = earlier.loc[finite.idxmax():].reset_index(drop=True) if finite.any() else earlier
+    for name, frame in {"earlier": earlier, "final_10_days": final}.items():
+        try:
+            intervals, summary = run_custom_strategy(frame, payload)
+            periods[name] = _period_summary(frame, intervals, summary)
+        except (ValueError, TypeError, KeyError) as exc:
+            periods[name] = {"error": str(exc)}
+
+    # Sensitivity: shift each threshold by up to ±2 steps (step = an eighth of the threshold gap).
+    step = (payload.upper - payload.lower) / 8
+    offsets = [-2, -1, 0, 1, 2]
+    lowers = [payload.lower + k * step for k in offsets]
+    uppers = [payload.upper + k * step for k in offsets]
+    evaluated = final if payload.evaluation == "last_10_days" else prepared
+    grid: list[list[float | None]] = []
+    for lower in lowers:
+        row: list[float | None] = []
+        for upper in uppers:
+            if lower >= upper:
+                row.append(None)
+                continue
+            update: dict[str, Any] = {"lower": lower, "upper": upper}
+            if payload.sizing != "fixed":
+                # Keep the outer sizing thresholds the same distance beyond the shifted entry thresholds.
+                update |= {"outer_lower": payload.outer_lower + lower - payload.lower,
+                           "outer_upper": payload.outer_upper + upper - payload.upper}
+            cell_request = payload.model_copy(update=update)
+            cell = evaluated.copy()
+            cell["Requested_Action"] = requested_actions(cell["Custom_Signal"], cell_request)
+            try:
+                row.append(run_custom_strategy(cell, cell_request)[1]["total_cashflow"])
+            except (ValueError, TypeError, KeyError):
+                row.append(None)
+        grid.append(row)
+    return _clean_json({
+        "periods": periods,
+        "grid": {"lowers": lowers, "uppers": uppers, "pnl": grid, "evaluated_rows": len(evaluated),
+                 "evaluation": payload.evaluation},
     })
 
 

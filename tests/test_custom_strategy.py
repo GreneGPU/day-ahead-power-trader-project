@@ -277,6 +277,34 @@ def test_dynamic_sizing_validation(extra):
     assert client.post('/api/custom-strategy', json=payload).status_code == 422
 
 
+@pytest.mark.parametrize('extra', [{}, {'sizing': 'step', 'outer_lower': 5, 'outer_upper': 95, 'max_multiplier': 2}])
+def test_robustness_matches_backtest_and_covers_earlier_period(extra):
+    payload = {'signal': 'formula', 'formula': 'signal = forecast_rank', 'direction': 'buy_low',
+               'lower': 20, 'upper': 80, 'trading_setup': 'prop', **extra}
+    backtest = client.post('/api/custom-strategy', json=payload).json()
+    response = client.post('/api/custom-strategy/robustness', json=payload)
+    assert response.status_code == 200, response.text
+    data = response.json()
+    grid = data['grid']
+    assert grid['lowers'][2] == 20 and grid['uppers'][2] == 80 and len(grid['pnl']) == 5
+    # The centre of the sensitivity grid and the final-10-day period are the backtest itself.
+    assert grid['pnl'][2][2] == pytest.approx(backtest['summary']['total_cashflow'])
+    final = data['periods']['final_10_days']
+    assert final['total_cashflow'] == pytest.approx(backtest['summary']['total_cashflow']) and final['days'] == 10
+    earlier = data['periods']['earlier']
+    assert earlier['days'] >= 5 and earlier['end'] < final['start']
+    assert 0 <= earlier['win_rate'] <= 1
+
+
+def test_robustness_grid_skips_crossed_thresholds():
+    payload = {'signal': 'formula', 'formula': 'signal = forecast_rank', 'direction': 'buy_low',
+               'lower': 45, 'upper': 55, 'trading_setup': 'prop'}
+    grid = client.post('/api/custom-strategy/robustness', json=payload).json()['grid']
+    for i, lower in enumerate(grid['lowers']):
+        for j, upper in enumerate(grid['uppers']):
+            assert (grid['pnl'][i][j] is None) == (lower >= upper)
+
+
 def test_replay_factors_align_with_intervals():
     from api.index import _load_deployment_results
     frame, _, _ = _load_deployment_results()

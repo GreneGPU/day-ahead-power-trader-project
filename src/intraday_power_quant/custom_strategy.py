@@ -185,10 +185,15 @@ def prepare_custom_signals(history: pd.DataFrame, request: CustomStrategyRequest
             raise ValueError("CSV timestamps must match the saved dataset. Download the template.")
         signal = frame["HourUTC"].map(records.set_index("HourUTC")["Signal"])
     frame["Custom_Signal"] = signal
+    frame["Requested_Action"] = requested_actions(signal, request)
+    return frame
+
+
+def requested_actions(signal: pd.Series, request: CustomStrategyRequest) -> np.ndarray:
+    """Thresholds -> charge (long) / discharge (short) / hold for each interval."""
     buy = signal <= request.lower if request.direction == "buy_low" else signal >= request.upper
     sell = signal >= request.upper if request.direction == "buy_low" else signal <= request.lower
-    frame["Requested_Action"] = np.select([buy, sell], ["charge", "discharge"], default="hold")
-    return frame
+    return np.select([buy, sell], ["charge", "discharge"], default="hold")
 
 
 def run_custom_strategy(frame: pd.DataFrame, request: CustomStrategyRequest):

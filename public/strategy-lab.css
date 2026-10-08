@@ -275,3 +275,33 @@ input[type=file]{padding:8px;font-size:12px}
   .pf-stats>div:nth-last-child(-n+2){border-bottom:0}
   #portfolioCanvas{height:180px}
 }
+
+/* Risk & execution metrics row */
+.metrics.metrics-risk{grid-template-columns:repeat(3,minmax(0,1fr))}
+.metrics.metrics-risk article{border-right:1px solid var(--line);border-bottom:1px solid var(--line)}
+.metrics.metrics-risk article:nth-child(3n){border-right:0}
+.metrics.metrics-risk article:nth-last-child(-n+3){border-bottom:0}
+.metrics.metrics-risk strong{font-size:24px}
+
+/* Robustness checks */
+.robustness{margin-top:20px}
+.rb-status{margin:0 0 12px;color:var(--muted);font-size:13px}
+.rb-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:24px;align-items:start}
+.robustness h4{margin:0 0 10px;color:var(--ink);font-size:14px;font-weight:500}
+.robustness .table-wrap{max-height:none}
+.robustness td,.robustness th{text-align:right}
+.robustness th:first-child,.robustness td:first-child{text-align:left}
+#rbHeatmap th,#rbHeatmap td{text-align:center;min-width:64px;font-variant-numeric:tabular-nums}
+#rbHeatmap td.rb-self{outline:2px solid var(--accent);outline-offset:-2px;font-weight:600}
+#rbHeatmap thead th:first-child{font:600 10px var(--mono);letter-spacing:.06em}
+.rb-verdict{margin:10px 0 0;color:var(--ink);font-size:13px;line-height:1.6}
+.rb-note{margin:6px 0 0;color:var(--muted);font-size:12px;line-height:1.6}
+@media (max-width:1000px){
+  .metrics.metrics-risk{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .metrics.metrics-risk article:nth-child(3n){border-right:1px solid var(--line)}
+  .metrics.metrics-risk article:nth-child(2n){border-right:0}
+  .metrics.metrics-risk article:nth-last-child(-n+3){border-bottom:1px solid var(--line)}
+  .metrics.metrics-risk article:nth-last-child(-n+2){border-bottom:0}
+  .rb-grid{grid-template-columns:1fr}
+}
+.rb-dates{color:var(--muted);font-size:11px;white-space:nowrap}

@@ -264,6 +264,31 @@
       <div class="result-heading"><div><span class="kicker">Backtest results</span><h2 class="display" id="labResultTitle">Waiting for the first run</h2><p id="labPeriod"></p><p class="window-note" id="labWindow"></p></div><button type="button" class="btn btn-outline" id="labExport">Download results CSV</button></div>
       <div id="labResults" hidden>
         <div class="metrics"><article><span>Net cashflow &#183; DKK</span><strong id="labPnl">&#8212;</strong><small id="labPnlNote">Through replay time, after costs</small></article><article><span>Maximum drawdown &#183; DKK</span><strong id="labDrawdown">&#8212;</strong><small id="labDrawdownNote">Through replay time</small></article><article><span>Active intervals</span><strong id="labActive">&#8212;</strong><small id="labWarmup"></small></article><article><span id="labLastLabel">Final stored energy &#183; MWh</span><strong id="labLast">&#8212;</strong><small id="labLastNote"></small></article></div>
+        <div class="metrics metrics-risk" aria-label="Risk and execution metrics">
+          <article><span>Win rate</span><strong id="rkWin">&#8212;</strong><small>Active intervals with positive P&amp;L</small></article>
+          <article><span>Profit factor</span><strong id="rkPf">&#8212;</strong><small>Gross gains &#247; gross losses</small></article>
+          <article><span>Sharpe &#183; annualised</span><strong id="rkSharpe">&#8212;</strong><small id="rkSharpeNote">From daily P&amp;L</small></article>
+          <article><span>VaR / ES 95% &#183; hourly &#183; DKK</span><strong id="rkVar">&#8212;</strong><small>Historical loss in a bad hour / average beyond it</small></article>
+          <article><span>Break-even cost &#183; DKK/MWh</span><strong id="rkBreakeven">&#8212;</strong><small id="rkBreakevenNote">Trading cost at which the edge disappears</small></article>
+          <article><span>MWh traded</span><strong id="rkTurnover">&#8212;</strong><small id="rkCostNote"></small></article>
+        </div>
+        <article class="card robustness" id="robustness" aria-labelledby="rbTitle">
+          <div class="card-head"><h3 id="rbTitle">Robustness checks</h3><p>Is the edge real, or tuned to these days? Runs automatically after each backtest.</p></div>
+          <p class="rb-status" id="rbStatus" role="status">Waiting for a backtest.</p>
+          <div class="rb-grid" id="rbBody" hidden>
+            <div class="rb-oos">
+              <h4>Out of sample &#183; same rule, earlier period</h4>
+              <div class="table-wrap"><table><thead><tr><th>Period</th><th>Days</th><th>P&amp;L &#183; DKK</th><th>Per day</th><th>Win rate</th><th>Max drawdown</th></tr></thead><tbody id="rbPeriods"></tbody></table></div>
+              <p class="rb-verdict" id="rbVerdict"></p>
+            </div>
+            <div class="rb-sens">
+              <h4>Threshold sensitivity &#183; P&amp;L, DKK</h4>
+              <div class="table-wrap"><table id="rbHeatmap"></table></div>
+              <p class="rb-verdict" id="rbPlateau"></p>
+              <p class="rb-note">Rows: lower threshold &#183; columns: upper threshold &#183; outlined: your rule. A robust edge shows a plateau of similar values around your rule, not a lone peak.</p>
+            </div>
+          </div>
+        </article>
         <article class="card log"><div class="card-head"><h3>Signal &amp; execution log</h3><p><span id="labLogCount"></span> <span class="positive">Long</span> / <span class="negative">Short</span>. Other intervals are collapsed below.</p></div><div class="table-wrap"><table><thead><tr><th>Time &#183; UTC</th><th>Signal</th><th>Requested</th><th>Executed</th><th>Cashflow &#183; DKK</th><th>Cumulative &#183; DKK</th></tr></thead><tbody id="labRows"></tbody></table></div><p id="labNoTrades" hidden>No executed positions through this replay time.</p><details id="labOtherIntervals" class="help-details"><summary id="labOtherCount">Other intervals</summary><div class="table-wrap"><table><thead><tr><th>Time &#183; UTC</th><th>Signal</th><th>Requested</th><th>Executed</th><th>Cashflow &#183; DKK</th><th>Cumulative &#183; DKK</th></tr></thead><tbody id="labOtherRows"></tbody></table></div></details></article>
       </div>
     </div>
