@@ -9,6 +9,7 @@
   let replayCursor = 0, replayTimer = null, runSerial = 0;
   const runs = [], runColors = ['#4fe0b0','#a5b4fc','#f5b54a','#ff8fab','#7dd3fc'];
   const chartFont = '11px ui-monospace,SFMono-Regular,Consolas,monospace';
+  const dayLabel = new Intl.DateTimeFormat('en-GB',{timeZone:'Europe/Copenhagen',weekday:'short',day:'numeric'});
   // Saved model inputs shown as tiles above the replay chart: [key in result.factors, label, unit].
   const factorTiles = [['wind','Wind','MW'],['solar','Solar','MW'],['demand','Demand','MW'],['forecast','Price forecast','DKK'],
     ['baseline','Hourly baseline','DKK'],['temperature','Temperature · 1d lag',''],['gas','Gas price · 1d lag',''],['rank','Forecast daily rank','/100']];
@@ -266,7 +267,10 @@
     if (!rect.width) return;
     canvas.width=Math.round(rect.width*scale);canvas.height=Math.round(rect.height*scale);
     const ctx=canvas.getContext('2d');ctx.scale(scale,scale);ctx.font=chartFont;
-    const start=Math.max(0,replayCursor-96), rows=result.intervals.slice(start,replayCursor);
+    // The x-axis spans a fixed window (1 day, 1 week or the whole test); it fills left to right, then scrolls.
+    const span=el('chartWindow').value==='all'?result.intervals.length:Number(el('chartWindow').value);
+    const slots=Math.max(2,Math.min(span,result.intervals.length));
+    const start=Math.max(0,replayCursor-slots), rows=result.intervals.slice(start,replayCursor);
     const left=65,right=rect.width-16,width=right-left,top=16,priceBottom=rect.height*.55,signalTop=rect.height*.67,bottom=rect.height-28;
     ctx.fillStyle='#9aa8cc';ctx.fillText('SIGNAL · formula output units',left,signalTop-14);
     if (!rows.length) {
@@ -281,15 +285,27 @@
     const [priceMin,priceMax]=extent([...rows.map(row=>row.Actual_Price),...forecasts.filter(Number.isFinite)]);
     const signals=rows.map(row=>row.Custom_Signal).filter(Number.isFinite);
     const [signalMin,signalMax]=extent([...signals,result.settings.lower,result.settings.upper]);
-    const x=i=>left+(rows.length===1?width/2:i/(rows.length-1)*width);
+    const x=i=>left+i/(slots-1)*width;
     const priceY=value=>priceBottom-(value-priceMin)/(priceMax-priceMin)*(priceBottom-top);
     const signalY=value=>bottom-(value-signalMin)/(signalMax-signalMin)*(bottom-signalTop);
+    const band=width/(slots-1);
+    ctx.save();ctx.beginPath();ctx.rect(left,0,width,rect.height);ctx.clip();
     rows.forEach((row,i)=>{
       // Shading deepens with position size, so sized-up intervals stand out.
       const alpha=Math.min(.42,.13*(row.Size_Multiplier||1));
       ctx.fillStyle=row.Position>0?`rgba(79,224,176,${alpha})`:row.Position<0?`rgba(255,143,171,${alpha})`:'rgba(255,255,255,0)';
-      const band=width/rows.length;ctx.fillRect(left+i*band,top,band,priceBottom-top);ctx.fillRect(left+i*band,signalTop,band,bottom-signalTop);
+      ctx.fillRect(x(i)-band/2,top,band,priceBottom-top);ctx.fillRect(x(i)-band/2,signalTop,band,bottom-signalTop);
     });
+    // Copenhagen midnight separators, labelled when there is room.
+    result.dayLabels ||= result.intervals.map(row=>dayLabel.format(new Date(row.HourUTC)));
+    let lastLabelX=-Infinity;
+    rows.forEach((row,i)=>{
+      const label=result.dayLabels[start+i];
+      if(i===0||label===result.dayLabels[start+i-1])return;
+      ctx.strokeStyle='#2a3868';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(x(i),top-4);ctx.lineTo(x(i),bottom);ctx.stroke();
+      if(x(i)-lastLabelX>=56){ctx.fillStyle='#7d8bb3';ctx.textAlign='left';ctx.fillText(label,x(i)+4,top-4);lastLabelX=x(i);}
+    });
+    ctx.restore();
     ctx.strokeStyle='#243159';ctx.lineWidth=1;
     for(let i=0;i<=3;i++){
       const value=priceMin+(priceMax-priceMin)*i/3,y=priceY(value);
@@ -301,7 +317,7 @@
     }
     function line(values,y,color,dash=[],lineWidth=2){ctx.strokeStyle=color;ctx.lineWidth=lineWidth;ctx.setLineDash(dash);ctx.beginPath();let connected=false;values.forEach((value,i)=>{if(!Number.isFinite(value)){connected=false;return;}if(connected)ctx.lineTo(x(i),y(value));else ctx.moveTo(x(i),y(value));connected=true;});ctx.stroke();ctx.setLineDash([]);}
     line(forecasts,priceY,'#e8ecf8',[5,4],1.6);line(rows.map(row=>row.Actual_Price),priceY,'#a5b4fc');line(rows.map(row=>row.Custom_Signal),signalY,'#f5b54a');
-    const inspected=pointer==null?rows.length-1:Math.round(Math.max(0,Math.min(1,pointer))*(rows.length-1));
+    const inspected=pointer==null?rows.length-1:Math.min(rows.length-1,Math.round(Math.max(0,Math.min(1,pointer))*(slots-1)));
     const row=rows[inspected];ctx.setLineDash([3,4]);ctx.strokeStyle='#c9d2ee';ctx.beginPath();ctx.moveTo(x(inspected),top);ctx.lineTo(x(inspected),bottom);ctx.stroke();ctx.setLineDash([]);
     const forecast=forecasts[inspected];
     if(Number.isFinite(forecast)){ctx.fillStyle='#e8ecf8';ctx.beginPath();ctx.arc(x(inspected),priceY(forecast),3,0,Math.PI*2);ctx.fill();}
@@ -446,6 +462,7 @@
   el('editSizing').addEventListener('click',()=>{
     pauseReplay();el('strategyEditor').open=true;el('strategyEditor').scrollIntoView({behavior:'auto',block:'start'});el('labSizing').focus({preventScroll:true});
   });
+  el('chartWindow').addEventListener('change',()=>drawSignal());
   el('signalCanvas').addEventListener('mousemove',event=>{
     const bounds=el('signalCanvas').getBoundingClientRect();drawSignal((event.clientX-bounds.left-65)/(bounds.width-81));
   });

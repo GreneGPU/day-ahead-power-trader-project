@@ -190,7 +190,8 @@
           <button type="button" class="sl-btn" id="replayStep">Next interval</button>
           <button type="button" class="sl-btn" id="replayReset">Restart</button>
           <button type="button" class="sl-btn" id="replayEnd">Show full test</button>
-          <label class="sl-speed" for="replaySpeed">Intervals / second <select id="replaySpeed"><option>1</option><option selected>4</option><option>16</option><option>96</option></select></label>
+          <label class="sl-speed" for="chartWindow">Chart window <select id="chartWindow"><option value="96">1 day</option><option value="672" selected>1 week</option><option value="all">Whole test</option></select></label>
+          <label class="sl-speed sl-speed-rate" for="replaySpeed">Intervals / second <select id="replaySpeed"><option>1</option><option>4</option><option selected>16</option><option>96</option></select></label>
           <input id="replayCursor" type="range" min="0" max="1" value="0" step="1" aria-label="Replay position">
         </div>
         <p id="signalChartStatus" class="sl-caption">Follow the price. Press Play to reveal the history.</p>
