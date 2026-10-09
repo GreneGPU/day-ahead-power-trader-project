@@ -39,5 +39,16 @@
     "Hourly_Baseline",
     "Hourly_Baseline"
   ],
-  "configured_champion": "TL_Residual_Average"
+  "configured_champion": "TL_Residual_Average",
+  "candidate_rule": "training-CV gate on the last 2 CV folds only (not adopted)",
+  "candidate_champions": [
+    "Hourly_Baseline",
+    "Hourly_Baseline",
+    "Hourly_Baseline",
+    "Hourly_Baseline",
+    "Hourly_Baseline",
+    "Hourly_Baseline",
+    "Hourly_Baseline",
+    "Hourly_Baseline"
+  ]
 }

@@ -32,6 +32,7 @@ from intraday_power_quant.custom_strategy import (
     run_custom_strategy,
 )
 from intraday_power_quant.latest_prices import latest_prices
+from intraday_power_quant.portfolio import book_period_summary, simulate_book
 from intraday_power_quant.significance import significance_tests
 from intraday_power_quant.tuning import (
     DailyPnlCapture,
@@ -475,6 +476,50 @@ def custom_strategy_robustness(payload: CustomStrategyRequest) -> dict[str, Any]
         "grid": {"lowers": lowers, "uppers": uppers, "pnl": grid, "evaluated_rows": len(evaluated),
                  "evaluation": payload.evaluation},
         "significance": significance,
+    })
+
+
+class PortfolioRobustnessRequest(BaseModel):
+    runs: list[CustomStrategyRequest] = Field(min_length=1, max_length=5)
+    weights: list[float]
+    cap_mwh: float = Field(default=0.0, ge=0, le=1e6)
+    daily_loss_limit_dkk: float = Field(default=0.0, ge=0, le=1e12)
+
+
+@app.post("/api/portfolio/robustness")
+def portfolio_robustness(payload: PortfolioRobustnessRequest) -> dict[str, Any]:
+    """Robustness of a netted book of Strategy Lab runs: earlier vs test period and significance tests."""
+    if len(payload.weights) != len(payload.runs) or any(w < 0 for w in payload.weights) or not any(payload.weights):
+        raise HTTPException(status_code=422, detail="Give one non-negative weight per run, at least one above 0.")
+    if any(run.trading_setup != "prop" for run in payload.runs):
+        raise HTTPException(status_code=422, detail="Portfolios combine Prop proxy runs only.")
+    history, _, _ = _load_deployment_results()
+    per_period: dict[str, list[pd.DataFrame]] = {"earlier": [], "test": []}
+    labels: list[str] = []
+    try:
+        for run in payload.runs:
+            prepared = prepare_custom_signals(history, run)
+            earlier, test, _, labels = _robustness_periods(prepared, payload.runs[0].evaluation)
+            finite = pd.Series(pd.to_numeric(earlier["Custom_Signal"], errors="coerce")).notna()
+            earlier = earlier.loc[finite.idxmax():].reset_index(drop=True) if finite.any() else earlier
+            for name, frame in {"earlier": earlier, "test": test}.items():
+                per_period[name].append(run_custom_strategy(frame, run)[0])
+    except (ValueError, TypeError, KeyError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    cost_rate = payload.runs[0].prop.transaction_cost_dkk_per_mwh
+    periods: dict[str, Any] = {}
+    test_book = None
+    for (name, frames), label in zip(per_period.items(), labels):
+        book = simulate_book(frames, payload.weights, cost_rate, payload.cap_mwh, payload.daily_loss_limit_dkk)
+        periods[name] = {"label": label, **book_period_summary(book)}
+        if name == "test":
+            test_book = book
+    return _clean_json({
+        "periods": periods,
+        "significance": significance_tests(test_book),
+        "members": len(payload.runs),
+        "evaluation": payload.runs[0].evaluation,
     })
 
 

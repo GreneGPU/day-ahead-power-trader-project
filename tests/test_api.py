@@ -59,7 +59,7 @@ def test_deployment_results_use_real_predictions() -> None:
     payload = response.json()
     assert payload["dataset"]["rows"] == 10744  # walk-forward out-of-sample history
     assert len(payload["prices"]) == 10744
-    assert len(payload["model_metrics"]) == 11  # 5 walk-forward rows + 6 thesis benchmarks
+    assert len(payload["model_metrics"]) == 12  # 6 walk-forward rows (incl. the candidate rule) + 6 thesis benchmarks
     assert payload["model_metrics"][0]["Model"] == "Walk-forward champion"
     sarimax_tl = next(
         row

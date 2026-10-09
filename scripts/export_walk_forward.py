@@ -17,7 +17,7 @@ FORECAST_COLUMNS = ["HourUTC", "Actual_Price", "Hourly_Baseline", "Prediction", 
                     "Transfer_Residual_Prediction"]
 METRIC_FIELDS = ["Model", "Model_Type", "Metric_Source", "Number_Features", "Test_Start", "Test_End", "Test_Rows",
                  "Test_Coverage_Pct", "MAE", "RMSE", "sMAPE", "R2"]
-WEBSITE_MODELS = ["Walk-forward champion", "Hourly baseline only", "Direct 15-min ensemble",
+WEBSITE_MODELS = ["Walk-forward champion", "Candidate: last-CV-folds gate", "Hourly baseline only", "Direct 15-min ensemble",
                   "TL residual simple average", "TL residual pure stacking"]
 
 
@@ -65,6 +65,8 @@ def export(results_dir: Path, output_dir: Path) -> None:
         "walk_forward_blocks": summary["blocks"],
         "walk_forward_champions": summary.get("champions"),
         "configured_champion": summary.get("configured_champion"),
+        "candidate_rule": summary.get("candidate_rule"),
+        "candidate_champions": summary.get("candidate_champions"),
         "rows": len(forecasts),
         "start": forecasts["HourUTC"].min().isoformat(),
         "end": forecasts["HourUTC"].max().isoformat(),

@@ -7,6 +7,7 @@
   let fundamentals = null;
   let initialReplay = true;
   let replayCursor = 0, replayTimer = null, runSerial = 0;
+  const triedRules = new Set();
   const runs = [], runColors = ['#4fe0b0','#a5b4fc','#f5b54a','#ff8fab','#7dd3fc'];
   const chartFont = '11px ui-monospace,SFMono-Regular,Consolas,monospace';
   const dayLabel = new Intl.DateTimeFormat('en-GB',{timeZone:'Europe/Copenhagen',weekday:'short',day:'numeric'});
@@ -104,12 +105,19 @@
     const signature=data.intervals.map(row=>row.HourUTC).join('|');
     if(runs.length && runs[0].signature!==signature) runs.length=0;
     data.runId=String(++runSerial); data.signature=signature;
+    // The same rule run again replaces its earlier copy, so it is never counted twice (comparison or book).
+    data.ruleKey=ruleKey(data.request);
+    const duplicate=runs.findIndex(run=>run.ruleKey===data.ruleKey);
+    if(duplicate>=0)runs.splice(duplicate,1);
+    triedRules.add(data.ruleKey);
     runs.push(data);if(runs.length>5)runs.shift();
     result=data;replayCursor=0;
     el('replayRun').replaceChildren();
     for(const run of runs){const option=document.createElement('option');option.value=run.runId;option.textContent=`#${run.runId} ${run.name}: ${run.settings.signal==='formula'?run.settings.formula:run.settings.signal}`;el('replayRun').append(option);}
     el('replayRun').value=data.runId;
   }
+  // A rule's identity is everything in its request except the display name.
+  function ruleKey(request) {const {name,...rule}=request||{};return JSON.stringify(rule);}
   function positionName(value) {return value>0?'Long':value<0?'Short':'Flat';}
   function renderReplay() {
     el('replayCursor').max=result.intervals.length;el('replayCursor').value=replayCursor;
@@ -487,7 +495,7 @@
     const body=el('rbSig');body.replaceChildren();
     if(!sig)return;
     if(sig.error){el('rbSigVerdict').textContent=sig.error;return;}
-    const tried=runSerial, pText=p=>p<0.001?'< 0.001':p.toFixed(3), pClass=p=>p<0.05?'p-strong':p<0.10?'p-weak':'p-none';
+    const tried=triedRules.size, pText=p=>p<0.001?'< 0.001':p.toFixed(3), pClass=p=>p<0.05?'p-strong':p<0.10?'p-weak':'p-none';
     const rows=[
       ['Daily t-test','Mean daily P&L is zero',`${format(sig.mean_daily)} ± ${format(sig.sd_daily)} DKK/day over ${sig.days} days · t = ${format(sig.t_stat)}`,sig.p_daily],
       ['Day shuffle','Today’s forecast adds nothing beyond the typical daily price shape',`${format(sig.actual_gross)} DKK actual vs ${format(sig.day_shuffle.null_mean)} with another day’s positions`,sig.day_shuffle.p],
@@ -563,7 +571,7 @@
   function renderPortfolio() {
     const ready=runs.length>=2&&runs[0].intervals[0]?.Position_MWh!==undefined&&runs[0].intervals[0]?.Is_Day_End!==undefined;
     el('pfEmpty').hidden=ready; el('pfBody').hidden=!ready;
-    if(!ready)return;
+    if(!ready){bookKey='';return;}
     // Rebuild weight inputs only when the runs or weighting mode change, so typing is not interrupted by the replay.
     const mode=el('pfWeighting').value, key=runs.map(run=>run.runId).join(',')+'|'+mode;
     if(key!==portfolio.rowsKey){
@@ -594,6 +602,7 @@
       for(const id of ['pfPnl','pfStandalone','pfSaved','pfDrawdown','pfExposure','pfDiversification'])el(id).textContent='—';
       el('pfNotes').textContent='Include at least one run with a weight above 0.';el('pfCorr').replaceChildren();drawPortfolio(null,0,0);return;
     }
+    scheduleBookRobustness(members,weights);
     const book=simulateBook(members,weights);
     const pnl=sum(book.cash,from,to), standalone=sum(book.standalone,from,to), saved=sum(book.standaloneCost,from,to)-sum(book.cost,from,to);
     let cumulative=0,peak=0,drawdown=0,exposureSum=0,exposureMax=0;
@@ -626,6 +635,56 @@
     el('pfNotes').textContent=`Weights scale each run’s MWh. Inverse-volatility weights, σ, correlation and the diversification ratio use the whole test (in-sample) on ${combined.length} hourly observations, so treat them as illustrative.${costs.size>1?' Runs use different transaction costs; the book uses the first included run’s rate.':''} Negative correlation (green) diversifies; positive (blue) concentrates.`;
     drawPortfolio(book,from,to);
   }
+  // ---- Book robustness: recomputed on the server whenever the book's runs, weights, cap or loss limit change ----
+  let bookTimer=null,bookSerial=0,bookKey='',bookState=null;
+  const pValueText=p=>p<0.001?'< 0.001':p.toFixed(3), pValueClass=p=>p<0.05?'p-strong':p<0.10?'p-weak':'p-none';
+  function scheduleBookRobustness(members,weights) {
+    const cap=Number(el('pfCap').value)||0,loss=Number(el('pfLoss').value)||0;
+    const included=members.map((run,i)=>[run,weights[i]]).filter(([,weight])=>weight>0);
+    const key=JSON.stringify([included.map(([run,weight])=>[run.runId,Number(weight.toFixed(4))]),cap,loss]);
+    if(key===bookKey)return;
+    bookKey=key;clearTimeout(bookTimer);const serial=++bookSerial;
+    if(included.length<2){bookState={status:'idle'};renderBookRobustness();return;}
+    bookState={status:'loading'};renderBookRobustness();
+    bookTimer=setTimeout(async()=>{
+      try{
+        const response=await fetch('/api/portfolio/robustness',{method:'POST',headers:{'Content-Type':'application/json'},signal:AbortSignal.timeout(90000),
+          body:JSON.stringify({runs:included.map(([run])=>run.request),weights:included.map(([,weight])=>weight),cap_mwh:cap,daily_loss_limit_dkk:loss})});
+        const data=await response.json();
+        if(!response.ok)throw new Error(typeof data.detail==='string'?data.detail:`Book robustness failed (${response.status}).`);
+        if(serial===bookSerial){bookState={status:'ready',data};renderBookRobustness();}
+      }catch(error){if(serial===bookSerial){bookState={status:'error',message:error.message};renderBookRobustness();}}
+    },700);
+  }
+  function renderBookRobustness() {
+    const state=bookState,periodsBody=el('pfRobustPeriods'),sigBody=el('pfRobustSig');
+    periodsBody.replaceChildren();sigBody.replaceChildren();el('pfRobustVerdict').textContent='';
+    const status=el('pfRobustStatus');
+    if(!state||state.status==='idle'){status.textContent='Include at least two runs with a weight above 0 to test the book.';return;}
+    if(state.status==='loading'){status.textContent='Updating book robustness…';return;}
+    if(state.status==='error'){status.textContent=`Book robustness unavailable: ${state.message}`;return;}
+    const {periods,significance:sig,members}=state.data;
+    status.textContent=`${members} runs netted with the weights, cap and loss limit above · recomputed on every change`;
+    const row=(cells,classes=[])=>{const tr=document.createElement('tr');cells.forEach((value,i)=>{const td=document.createElement('td');td.textContent=value;if(classes[i])td.className=classes[i];tr.append(td);});return tr;};
+    for(const key of ['earlier','test']){
+      const p=periods[key],sign=p.total_cashflow>0?'positive':p.total_cashflow<0?'negative':'';
+      periodsBody.append(row([`${p.label} ${p.start.slice(5,10)} – ${p.end.slice(5,10)}`,p.days,format(p.total_cashflow),format(p.pnl_per_day),p.win_rate==null?'—':`${format(p.win_rate*100)}%`,format(p.max_drawdown)],['',  '',sign,sign,'','']));
+    }
+    if(sig&&!sig.error){
+      for(const [name,evidence,p] of [
+        ['Daily t-test',`${format(sig.mean_daily)} ± ${format(sig.sd_daily)} DKK/day over ${sig.days} days`,sig.p_daily],
+        ['Day shuffle',`${format(sig.actual_gross)} actual vs ${format(sig.day_shuffle.null_mean)} with another day’s positions`,sig.day_shuffle.p],
+        ['Timing shift',`${format(sig.actual_gross)} actual vs ${format(sig.timing_shift.null_mean)} shifted within the day`,sig.timing_shift.p],
+      ])sigBody.append(row([name,evidence,pValueText(p)],['','',pValueClass(p)]));
+    }
+    const early=periods.earlier,late=periods.test;
+    const both=early.pnl_per_day>0&&late.pnl_per_day>0;
+    el('pfRobustVerdict').textContent=(both?`The book is profitable in both periods (${format(early.pnl_per_day)} and ${format(late.pnl_per_day)} DKK/day). `
+      :`The book is not profitable in both periods (${format(early.pnl_per_day)} and ${format(late.pnl_per_day)} DKK/day). `)
+      +(sig&&!sig.error?(sig.p_daily<0.05?'Its mean daily P&L is significant at 5%':'Its mean daily P&L is not significant at 5%')
+      +(sig.day_shuffle.p<0.05?', and the day-specific forecasts add value beyond the daily price shape.':'; shuffling days keeps most of it, so the edge is mainly the daily price shape.'):'');
+  }
+
   function drawPortfolio(book,from,to) {
     const canvas=el('portfolioCanvas'),rect=canvas.getBoundingClientRect(),scale=window.devicePixelRatio||1;
     if(!rect.width)return;

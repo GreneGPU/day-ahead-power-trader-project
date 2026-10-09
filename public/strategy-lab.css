@@ -311,3 +311,9 @@ input[type=file]{padding:8px;font-size:12px}
 .rb-sig td:last-child{font-weight:600;font-variant-numeric:tabular-nums}
 .rb-sig .p-strong{color:var(--green)}.rb-sig .p-weak{color:#b45309}.rb-sig .p-none{color:var(--red)}
 .rb-sig th,.rb-sig td{text-align:left!important;vertical-align:top}.rb-sig th:last-child,.rb-sig td:last-child{text-align:right!important}
+.pf-robust{margin-top:18px;padding-top:16px;border-top:1px solid var(--p-line-soft)}
+.pf-robust .table-wrap{margin-top:10px}
+.pf-robust-status{margin:6px 0 0;color:var(--p-muted);font-size:13px}
+.pf-robust td:first-child{white-space:normal}
+.pf-robust .p-strong{color:var(--p-long)}.pf-robust .p-weak{color:var(--p-signal)}.pf-robust .p-none{color:var(--p-short)}
+.pf-robust-verdict{color:var(--p-text)!important}

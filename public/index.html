@@ -252,6 +252,13 @@
             </div>
             <div class="pf-chart"><div class="pf-chart-head"><span class="sl-label">Cumulative P&amp;L &#183; DKK</span><span class="pf-legend"><i class="pf-l-book"></i>Netted book <i class="pf-l-sum"></i>Sum of stand-alone <i class="pf-l-exp"></i>Net exposure</span></div><canvas id="portfolioCanvas" role="img" aria-label="Cumulative portfolio P&amp;L against the sum of stand-alone runs, with net exposure bars"></canvas></div>
             <div class="pf-corr"><span class="sl-label">Hourly P&amp;L correlation &#183; whole test</span><div class="table-wrap"><table id="pfCorr"></table></div></div>
+            <div class="pf-robust" aria-labelledby="pfRobustTitle">
+              <span class="sl-label" id="pfRobustTitle">Book robustness &#183; updates as you change the book</span>
+              <p class="pf-robust-status" id="pfRobustStatus" role="status" aria-live="polite">Include at least two runs to test the book.</p>
+              <div class="table-wrap"><table><thead><tr><th>Period</th><th>Days</th><th>Book P&amp;L &#183; DKK</th><th>Per day</th><th>Win rate</th><th>Max drawdown</th></tr></thead><tbody id="pfRobustPeriods"></tbody></table></div>
+              <div class="table-wrap"><table><thead><tr><th>Test &#183; book, test period</th><th>Evidence</th><th>p-value</th></tr></thead><tbody id="pfRobustSig"></tbody></table></div>
+              <p class="rb-verdict pf-robust-verdict" id="pfRobustVerdict"></p>
+            </div>
             <p class="sl-note" id="pfNotes"></p>
           </div>
         </div>

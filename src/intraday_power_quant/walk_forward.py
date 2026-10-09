@@ -12,6 +12,10 @@ Each block's champion is chosen without hindsight:
 * per-block gate - a model trained on 15-minute data (residual or direct) may only be champion if its
   time-series cross-validated MAE on that block's *training* data beats the hourly baseline's; otherwise the
   block falls back to the hourly baseline.
+
+A candidate rule is evaluated alongside without being adopted: the same gate measured on the *last* CV folds
+only, which are trained on most of the data and so judge the final model less pessimistically. Its decisions
+and forecasts are recorded so it can be validated on future data before it replaces the official rule.
 """
 from __future__ import annotations
 
@@ -27,6 +31,7 @@ from .models import predict_stacked_ensemble, train_stacked_ensemble
 from .transfer import _write_frame, prepare_transfer_inputs
 
 CANDIDATES = ["Hourly_Baseline", "TL_Residual_Average", "TL_Residual_Stacked", "Direct_15min_Stacked"]
+CANDIDATE_GATE_LAST_FOLDS = 2
 FAMILY = {"TL_Residual_Average": "residual", "TL_Residual_Stacked": "residual", "Direct_15min_Stacked": "direct"}
 
 
@@ -41,7 +46,16 @@ def walk_forward_blocks(times: pd.Series, min_train_days: float, block_days: flo
     return blocks
 
 
-def cv_gate(oof_prediction: np.ndarray, target: np.ndarray, baseline_target: np.ndarray) -> dict[str, float | bool]:
+def last_folds_mask(rows: int, n_splits: int, last_folds: int) -> np.ndarray:
+    """Rows validated in the last ``last_folds`` of a TimeSeriesSplit (equal, consecutive validation chunks)."""
+    fold_size = rows // (n_splits + 1)
+    mask = np.zeros(rows, dtype=bool)
+    mask[rows - last_folds * fold_size:] = True
+    return mask
+
+
+def cv_gate(oof_prediction: np.ndarray, target: np.ndarray, baseline_target: np.ndarray,
+            rows: np.ndarray | None = None) -> dict[str, float | bool]:
     """Compare a model's out-of-fold MAE with the baseline's on the same training rows.
 
     For the residual family ``target`` is the residual and ``baseline_target`` is zero (the baseline's
@@ -49,6 +63,8 @@ def cv_gate(oof_prediction: np.ndarray, target: np.ndarray, baseline_target: np.
     hourly baseline.
     """
     valid = ~np.isnan(oof_prediction)
+    if rows is not None:
+        valid &= rows
     model_mae = float(np.abs(target[valid] - oof_prediction[valid]).mean())
     baseline_mae = float(np.abs(target[valid] - baseline_target[valid]).mean())
     return {"model_cv_mae": model_mae, "baseline_cv_mae": baseline_mae, "passes": model_mae < baseline_mae}
@@ -96,6 +112,11 @@ def run_walk_forward(config: ProjectConfig, min_train_days: float = 35, block_da
             "residual": cv_gate(residual_model["oof_average"], train_residual, np.zeros_like(train_residual)),
             "direct": cv_gate(direct_model["oof_average"], train_price, train_baseline),
         }
+        last_rows = last_folds_mask(len(train), config.n_splits, CANDIDATE_GATE_LAST_FOLDS)
+        candidate_gates = {
+            "residual": cv_gate(residual_model["oof_average"], train_residual, np.zeros_like(train_residual), last_rows),
+            "direct": cv_gate(direct_model["oof_average"], train_price, train_baseline, last_rows),
+        }
         residual = predict_stacked_ensemble(residual_model, test[residual_cols].reset_index(drop=True))
         direct = predict_stacked_ensemble(direct_model, test[feature_cols_15].reset_index(drop=True))
         baseline = test["Hourly_Baseline"].to_numpy()
@@ -112,6 +133,10 @@ def run_walk_forward(config: ProjectConfig, min_train_days: float = 35, block_da
         champion, reason = choose_champion(earlier, default_champion, {k: bool(v["passes"]) for k, v in gates.items()})
         piece["Prediction"] = piece[champion]
         piece["Champion"] = champion
+        candidate, candidate_reason = choose_champion(earlier, default_champion,
+                                                      {k: bool(v["passes"]) for k, v in candidate_gates.items()})
+        piece["Candidate_Prediction"] = piece[candidate]
+        piece["Candidate_Champion"] = candidate
         print(f"Block {number} champion: {champion} ({reason}); residual CV MAE {gates['residual']['model_cv_mae']:.2f} "
               f"vs baseline {gates['residual']['baseline_cv_mae']:.2f}")
         pieces.append(piece)
@@ -123,7 +148,12 @@ def run_walk_forward(config: ProjectConfig, min_train_days: float = 35, block_da
                       "Residual_Gate_Passed": gates["residual"]["passes"],
                       "Direct_CV_MAE": gates["direct"]["model_cv_mae"],
                       "Direct_Gate_Baseline_CV_MAE": gates["direct"]["baseline_cv_mae"],
-                      "Direct_Gate_Passed": gates["direct"]["passes"]})
+                      "Direct_Gate_Passed": gates["direct"]["passes"],
+                      "Candidate_Champion": candidate, "Candidate_Reason": candidate_reason,
+                      "Residual_LastCV_MAE": candidate_gates["residual"]["model_cv_mae"],
+                      "Residual_LastCV_Baseline_MAE": candidate_gates["residual"]["baseline_cv_mae"],
+                      "Residual_LastCV_Gate_Passed": candidate_gates["residual"]["passes"],
+                      "Direct_LastCV_Gate_Passed": candidate_gates["direct"]["passes"]})
 
     results = pd.concat(pieces, ignore_index=True)
     results["Direct_15min_Prediction"] = results["Direct_15min_Stacked"]
@@ -133,7 +163,8 @@ def run_walk_forward(config: ProjectConfig, min_train_days: float = 35, block_da
 
     fold_table = pd.DataFrame(folds)
     by_block = results.groupby("Walk_Forward_Block")
-    for column, label in [("Hourly_Baseline", "Baseline"), ("Prediction", "Champion"), ("TL_Residual_Average", "TL_Average"),
+    for column, label in [("Hourly_Baseline", "Baseline"), ("Prediction", "Champion"), ("Candidate_Prediction", "Candidate"),
+                          ("TL_Residual_Average", "TL_Average"),
                           ("TL_Residual_Stacked", "TL_Stacked"), ("Direct_15min_Prediction", "Direct")]:
         fold_table[f"{label}_MAE"] = by_block.apply(
             lambda block, c=column: (block["Actual_Price"] - block[c]).abs().mean(), include_groups=False).to_numpy()
@@ -149,6 +180,7 @@ def run_walk_forward(config: ProjectConfig, min_train_days: float = 35, block_da
     uses_baseline = config.use_hourly_baseline_as_residual_feature
     metric_specs = [
         ("Walk-forward champion", "Gated nested selection", "Prediction", n_residual, uses_baseline),
+        ("Candidate: last-CV-folds gate", "Candidate rule (not adopted)", "Candidate_Prediction", n_residual, uses_baseline),
         ("Hourly baseline only", "Hourly source baseline", "Hourly_Baseline", 1, None),
         ("Direct 15-min ensemble", "15-min scratch", "Direct_15min_Prediction", n_direct, None),
         ("TL residual simple average", "Transfer learning", "TL_Residual_Average", n_residual, uses_baseline),
@@ -164,6 +196,8 @@ def run_walk_forward(config: ProjectConfig, min_train_days: float = 35, block_da
     summary = {
         "method": metadata["Test_Split_Method"], "configured_champion": default_champion,
         "champions": fold_table["Champion"].tolist(),
+        "candidate_rule": f"training-CV gate on the last {CANDIDATE_GATE_LAST_FOLDS} CV folds only (not adopted)",
+        "candidate_champions": fold_table["Candidate_Champion"].tolist(),
         "blocks": len(folds), "rows": len(results), "test_start": str(metadata["Test_Start"]),
         "test_end": str(metadata["Test_End"]), "coverage": coverage,
         "hourly_source_train_end": str(inputs["df_hourly_source_train"][time_col].max()),
@@ -172,6 +206,7 @@ def run_walk_forward(config: ProjectConfig, min_train_days: float = 35, block_da
     }
     (output_dir / "walk_forward_summary.json").write_text(json.dumps(summary, indent=2, default=str), encoding="utf-8")
     print("\nWalk-forward blocks:")
-    print(fold_table[["Block", "Test_Start", "Train_Rows", "Champion", "Residual_Gate_Passed", "Residual_CV_MAE",
-                      "Baseline_MAE", "Champion_MAE", "TL_Average_MAE", "TL_Stacked_MAE", "Direct_MAE"]].round(2).to_string(index=False))
+    print(fold_table[["Block", "Champion", "Residual_Gate_Passed", "Candidate_Champion", "Residual_LastCV_Gate_Passed",
+                      "Baseline_MAE", "Champion_MAE", "Candidate_MAE", "TL_Average_MAE", "TL_Stacked_MAE",
+                      "Direct_MAE"]].round(2).to_string(index=False))
     return summary

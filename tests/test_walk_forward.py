@@ -52,3 +52,16 @@ def test_champion_uses_only_earlier_blocks_and_respects_the_gate():
     # The best earlier model is residual-based, but its gate failed on this block's training data.
     champion, reason = choose_champion(earlier, "TL_Residual_Average", {"residual": False, "direct": True})
     assert champion == "Hourly_Baseline" and "gate" in reason
+
+
+def test_last_folds_mask_matches_sklearn_time_series_split():
+    import numpy as np
+    from sklearn.model_selection import TimeSeriesSplit
+    from intraday_power_quant.walk_forward import last_folds_mask
+
+    for rows in (12, 3360, 12764):
+        folds = list(TimeSeriesSplit(n_splits=5).split(np.zeros(rows)))
+        expected = np.zeros(rows, dtype=bool)
+        for _, validation in folds[-2:]:
+            expected[validation] = True
+        assert (last_folds_mask(rows, 5, 2) == expected).all()
