@@ -479,7 +479,29 @@
     }catch(error){run.robustness={status:'error',message:error.message};}
     if(run===result)renderRobustness();
   }
+  const optionText=(id,value)=>[...el(id).options].find(option=>option.value===value)?.textContent||value;
+  // What a run tests, from its own settings (not the form, which may have been edited since).
+  function describeRun(run) {
+    const s=run.settings, prop=!isBattery(run), forecast=optionText('labForecast',s.forecast_col);
+    const signal={formula:s.formula, forecast_change:`signal = forecast change over ${s.lookback} × 15 min`, forecast:'signal = forecast price',
+      baseline_spread:'signal = forecast − hourly baseline', csv:'signal = uploaded CSV'}[s.signal]||s.signal;
+    const buy=prop?'long':'charge', sell=prop?'short':'discharge', low=s.direction==='buy_low';
+    const rule=`${signal} · ${low?buy:sell} if ≤ ${format(s.lower)} · ${low?sell:buy} if ≥ ${format(s.upper)}`;
+    const meta=[prop?'Prop proxy':'Battery', optionText('labEvaluation',s.evaluation), s.signal==='csv'?null:`forecast: ${forecast}`,
+      s.sizing&&s.sizing!=='fixed'?`${s.sizing} sizing up to ${format(s.max_multiplier)}×`:null].filter(Boolean).join(' · ');
+    return {rule,meta};
+  }
+  function renderSubject() {
+    el('rbSubject').hidden=!result; if(!result)return;
+    const {rule,meta}=describeRun(result), index=runs.indexOf(result);
+    el('rbSwatch').style.background=runColors[index]||'';
+    el('rbSubjectName').textContent=`#${result.runId} ${result.name}`;
+    el('rbSubjectRule').textContent=rule; el('rbSubjectMeta').textContent=meta;
+  }
   function renderRobustness() {
+    renderSubject();
+    // Runs added by the book were never checked; check one when it is selected.
+    if(result&&!result.robustness&&result.request){runRobustness(result);return;}
     const state=result?.robustness;
     if(state===robustShown)return; robustShown=state;
     el('rbBody').hidden=state?.status!=='ready';
@@ -488,7 +510,7 @@
     if(state.status==='loading'){el('rbStatus').textContent='Running robustness checks…';return;}
     if(state.status==='error'){el('rbStatus').textContent=`Robustness checks unavailable: ${state.message}`;return;}
     const {periods,grid}=state.data, settings=result.settings;
-    el('rbStatus').textContent=`${result.name} · thresholds ${format(settings.lower)} / ${format(settings.upper)}${settings.sizing&&settings.sizing!=='fixed'?` · ${settings.sizing} sizing`:''}`;
+    el('rbStatus').textContent=runs.length>1?'These checks follow the run shown in the replay; pick another run there to test it.':'Checks for the run above.';
     const body=el('rbPeriods');body.replaceChildren();
     for(const key of ['earlier','test']){
       const period=periods[key],tr=document.createElement('tr'),label=document.createElement('td');
@@ -785,16 +807,17 @@
     const key=JSON.stringify([included.map(([run,weight])=>[run.runId,Number(weight.toFixed(4))]),cap,loss]);
     if(key===bookKey)return;
     bookKey=key;clearTimeout(bookTimer);const serial=++bookSerial;
+    const names=included.map(([run,weight])=>`#${run.runId} ${run.name} ×${weight.toFixed(2)}`);
     if(included.length<2){bookState={status:'idle'};renderBookRobustness();return;}
-    bookState={status:'loading'};renderBookRobustness();
+    bookState={status:'loading',names};renderBookRobustness();
     bookTimer=setTimeout(async()=>{
       try{
         const response=await fetch('/api/portfolio/robustness',{method:'POST',headers:{'Content-Type':'application/json'},signal:AbortSignal.timeout(90000),
           body:JSON.stringify({runs:included.map(([run])=>run.request),weights:included.map(([,weight])=>weight),cap_mwh:cap,daily_loss_limit_dkk:loss})});
         const data=await response.json();
         if(!response.ok)throw new Error(typeof data.detail==='string'?data.detail:`Book robustness failed (${response.status}).`);
-        if(serial===bookSerial){bookState={status:'ready',data};renderBookRobustness();}
-      }catch(error){if(serial===bookSerial){bookState={status:'error',message:error.message};renderBookRobustness();}}
+        if(serial===bookSerial){bookState={status:'ready',data,names};renderBookRobustness();}
+      }catch(error){if(serial===bookSerial){bookState={status:'error',message:error.message,names};renderBookRobustness();}}
     },700);
   }
   function renderBookRobustness() {
@@ -802,10 +825,11 @@
     periodsBody.replaceChildren();sigBody.replaceChildren();el('pfRobustVerdict').textContent='';
     const status=el('pfRobustStatus');
     if(!state||state.status==='idle'){status.textContent='Include at least two runs with a weight above 0 to test the book.';return;}
-    if(state.status==='loading'){status.textContent='Updating book robustness…';return;}
-    if(state.status==='error'){status.textContent=`Book robustness unavailable: ${state.message}`;return;}
-    const {periods,significance:sig,members}=state.data;
-    status.textContent=`${members} runs netted${state.data.trading_setup==='battery'?' into one shared battery':''} with the weights, cap and loss limit above · recomputed on every change`;
+    const tested=`Testing the book: ${state.names.join(' + ')}`;
+    if(state.status==='loading'){status.textContent=`${tested} · updating…`;return;}
+    if(state.status==='error'){status.textContent=`${tested} · unavailable: ${state.message}`;return;}
+    const {periods,significance:sig}=state.data;
+    status.textContent=`${tested} · netted${state.data.trading_setup==='battery'?' into one shared battery':''} with the cap and loss limit above, recomputed on every change`;
     const row=(cells,classes=[])=>{const tr=document.createElement('tr');cells.forEach((value,i)=>{const td=document.createElement('td');td.textContent=value;if(classes[i])td.className=classes[i];tr.append(td);});return tr;};
     for(const key of ['earlier','test']){
       const p=periods[key],sign=p.total_cashflow>0?'positive':p.total_cashflow<0?'negative':'';
@@ -960,5 +984,5 @@
   // The inline editor behaves like a one-line code cell: Enter runs it, Shift+Enter adds a line.
   el('labFormula').addEventListener('keydown',event=>{if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();el('labForm').requestSubmit();}});
   window.addEventListener('resize',()=>{draw();if(result)renderPortfolio();}); buildFactors(); buildLibrary(); updateFields();
-  el('labForm').requestSubmit();
+  applyPreset(presets.find(p=>p.name==='Forecast momentum'));  // the lab opens on this rule
 })();

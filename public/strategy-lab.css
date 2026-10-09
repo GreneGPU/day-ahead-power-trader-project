@@ -286,6 +286,13 @@ input[type=file]{padding:8px;font-size:12px}
 /* Robustness checks */
 .robustness{margin-top:20px}
 .rb-status{margin:0 0 12px;color:var(--muted);font-size:13px}
+.rb-subject{display:flex;gap:12px;align-items:stretch;margin:0 0 14px;padding:12px 14px;border:1px solid var(--line);border-radius:10px;background:rgba(83,58,253,.05)}
+.rb-swatch{flex:0 0 4px;border-radius:2px;background:var(--accent)}
+.rb-subject>div{display:flex;flex-direction:column;gap:3px;min-width:0}
+.rb-subject small{color:var(--muted);font:600 10px var(--mono);letter-spacing:.08em;text-transform:uppercase}
+.rb-subject strong{color:var(--ink);font-size:16px;font-weight:600}
+.rb-subject code{color:var(--accent);font:12px var(--mono);overflow-wrap:anywhere}
+.rb-subject span{color:var(--muted);font-size:12px}
 .rb-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:24px;align-items:start}
 .robustness h4{margin:0 0 10px;color:var(--ink);font-size:14px;font-weight:500}
 .robustness .table-wrap{max-height:none}

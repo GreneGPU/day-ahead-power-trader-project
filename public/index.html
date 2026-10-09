@@ -181,7 +181,7 @@
 
         <div class="sl-chart">
           <canvas id="signalCanvas" role="img" aria-label="Historical day-ahead price and custom signal, with shaded long and short position intervals"></canvas>
-          <p id="replayLaunchStatus" class="sl-overlay" role="status">Loading the cheapest-20% / priciest-20% replay&#8230;</p>
+          <p id="replayLaunchStatus" class="sl-overlay" role="status">Loading the forecast-momentum replay&#8230;</p>
         </div>
         <div class="sl-legend" aria-hidden="true"><span class="lg-price">Day-ahead price</span><span class="lg-forecast">Price forecast</span><span class="lg-signal">Signal</span><span class="lg-threshold">Thresholds</span><span class="lg-long">Long</span><span class="lg-short">Short</span></div>
 
@@ -282,6 +282,10 @@
         </div>
         <article class="card robustness" id="robustness" aria-labelledby="rbTitle">
           <div class="card-head"><h3 id="rbTitle">Robustness checks</h3><p>Is the edge real, or tuned to these days? Runs automatically after each backtest.</p></div>
+          <div class="rb-subject" id="rbSubject" hidden>
+            <span class="rb-swatch" id="rbSwatch" aria-hidden="true"></span>
+            <div><small>Testing</small><strong id="rbSubjectName"></strong><code id="rbSubjectRule"></code><span id="rbSubjectMeta"></span></div>
+          </div>
           <p class="rb-status" id="rbStatus" role="status">Waiting for a backtest.</p>
           <div class="rb-grid" id="rbBody" hidden>
             <div class="rb-oos">
@@ -313,7 +317,7 @@
       <details class="strategy-editor" id="strategyEditor"><summary><span><span class="kicker">Strategy settings</span><b>Signal source, thresholds, sizing and data uploads</b></span><span class="chev" aria-hidden="true">&#8250;</span></summary>
         <div class="lab-columns">
           <section class="card"><h3><span>01</span> Define the signal</h3>
-            <label for="labName">Strategy name</label><input id="labName" maxlength="80" value="Cheapest 20% / priciest 20%" required>
+            <label for="labName">Strategy name</label><input id="labName" maxlength="80" value="Forecast momentum" required>
             <label for="labSignal">Signal source</label><select id="labSignal"><option value="formula">Write a formula</option><option value="baseline_spread">Forecast minus hourly baseline</option><option value="forecast">Forecast price</option><option value="forecast_change">Forecast change over prior intervals</option><option value="csv">My signal &#183; CSV upload</option></select>
             <div id="labFormulaExtras">
               <p><strong>Upload required:</strong> <code>outages</code> in MW. Missing data is never assumed to be zero.</p>
