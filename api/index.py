@@ -32,7 +32,7 @@ from intraday_power_quant.custom_strategy import (
     run_custom_strategy,
 )
 from intraday_power_quant.latest_prices import latest_prices
-from intraday_power_quant.portfolio import book_period_summary, simulate_book
+from intraday_power_quant.portfolio import book_period_summary, simulate_battery_book, simulate_book
 from intraday_power_quant.significance import significance_tests
 from intraday_power_quant.tuning import (
     DailyPnlCapture,
@@ -465,12 +465,10 @@ def custom_strategy_robustness(payload: CustomStrategyRequest) -> dict[str, Any]
             except (ValueError, TypeError, KeyError):
                 row.append(None)
         grid.append(row)
-    significance = None
-    if payload.trading_setup == "prop":
-        try:
-            significance = significance_tests(run_custom_strategy(evaluated, payload)[0])
-        except (ValueError, TypeError, KeyError) as exc:
-            significance = {"error": str(exc)}
+    try:  # battery runs get the daily t-test; the permutation tests need Prop proxy positions
+        significance = significance_tests(run_custom_strategy(evaluated, payload)[0])
+    except (ValueError, TypeError, KeyError) as exc:
+        significance = {"error": str(exc)}
     return _clean_json({
         "periods": periods,
         "grid": {"lowers": lowers, "uppers": uppers, "pnl": grid, "evaluated_rows": len(evaluated),
@@ -491,8 +489,9 @@ def portfolio_robustness(payload: PortfolioRobustnessRequest) -> dict[str, Any]:
     """Robustness of a netted book of Strategy Lab runs: earlier vs test period and significance tests."""
     if len(payload.weights) != len(payload.runs) or any(w < 0 for w in payload.weights) or not any(payload.weights):
         raise HTTPException(status_code=422, detail="Give one non-negative weight per run, at least one above 0.")
-    if any(run.trading_setup != "prop" for run in payload.runs):
-        raise HTTPException(status_code=422, detail="Portfolios combine Prop proxy runs only.")
+    setup = payload.runs[0].trading_setup
+    if any(run.trading_setup != setup for run in payload.runs):
+        raise HTTPException(status_code=422, detail="A book combines runs of one trading setup: all Prop proxy or all Battery.")
     history, _, _ = _load_deployment_results()
     per_period: dict[str, list[pd.DataFrame]] = {"earlier": [], "test": []}
     labels: list[str] = []
@@ -508,10 +507,14 @@ def portfolio_robustness(payload: PortfolioRobustnessRequest) -> dict[str, Any]:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     cost_rate = payload.runs[0].prop.transaction_cost_dkk_per_mwh
+    battery = BatteryConfig(**payload.runs[0].battery.model_dump())
     periods: dict[str, Any] = {}
     test_book = None
     for (name, frames), label in zip(per_period.items(), labels):
-        book = simulate_book(frames, payload.weights, cost_rate, payload.cap_mwh, payload.daily_loss_limit_dkk)
+        if setup == "battery":  # one shared battery; cap_mwh is read as a power cap in MW
+            book = simulate_battery_book(frames, payload.weights, battery, payload.cap_mwh, payload.daily_loss_limit_dkk)
+        else:
+            book = simulate_book(frames, payload.weights, cost_rate, payload.cap_mwh, payload.daily_loss_limit_dkk)
         periods[name] = {"label": label, **book_period_summary(book)}
         if name == "test":
             test_book = book
@@ -519,6 +522,7 @@ def portfolio_robustness(payload: PortfolioRobustnessRequest) -> dict[str, Any]:
         "periods": periods,
         "significance": significance_tests(test_book),
         "members": len(payload.runs),
+        "trading_setup": setup,
         "evaluation": payload.runs[0].evaluation,
     })
 

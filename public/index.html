@@ -232,10 +232,10 @@
 
         <div class="sl-portfolio" id="portfolio" aria-labelledby="pfTitle">
           <div class="sl-portfolio-head">
-            <div><span class="sl-label" id="pfTitle">Portfolio &#183; combine runs into one book</span><p class="sl-note">Positions from the selected runs are added up per 15-minute interval, so opposite trades cancel before costs. The book is re-simulated with the same rules: next day-ahead move, imbalance close at day end, costs on every MWh change. Results follow the chart window.</p></div>
+            <div><span class="sl-label" id="pfTitle">Portfolio &#183; combine runs into one book</span><p class="sl-note" id="pfIntro">Positions from the selected runs are added up per 15-minute interval, so opposite trades cancel before costs. The book is re-simulated with the same rules: next day-ahead move, imbalance close at day end, costs on every MWh change. Results follow the chart window.</p></div>
             <div class="pf-controls">
               <label class="sl-speed" for="pfWeighting">Weights <select id="pfWeighting"><option value="equal">Equal size</option><option value="inverse_vol">Inverse volatility</option><option value="manual">Manual</option></select></label>
-              <label class="sl-speed" for="pfCap">Net cap &#183; MWh <input id="pfCap" type="number" min="0" step="any" value="0"></label>
+              <label class="sl-speed" for="pfCap"><span id="pfCapLabel">Net cap &#183; MWh</span> <input id="pfCap" type="number" min="0" step="any" value="0"></label>
               <label class="sl-speed" for="pfLoss">Daily loss limit &#183; DKK <input id="pfLoss" type="number" min="0" step="any" value="0"></label>
             </div>
           </div>
@@ -246,9 +246,9 @@
             <div class="pf-stats">
               <div><small>Portfolio P&amp;L &#183; window</small><strong id="pfPnl">&#8212;</strong><span id="pfPnlNote"></span></div>
               <div><small>Sum of stand-alone runs</small><strong id="pfStandalone">&#8212;</strong><span>same weights, traded separately</span></div>
-              <div><small>Costs saved by netting</small><strong id="pfSaved">&#8212;</strong><span id="pfTurnover"></span></div>
+              <div><small id="pfSavedLabel">Costs saved by netting</small><strong id="pfSaved">&#8212;</strong><span id="pfTurnover"></span></div>
               <div><small>Max drawdown &#183; window</small><strong id="pfDrawdown">&#8212;</strong><span>portfolio, after costs</span></div>
-              <div><small>Net exposure &#183; avg / max</small><strong id="pfExposure">&#8212;</strong><span id="pfLimits"></span></div>
+              <div><small id="pfExposureLabel">Net exposure &#183; avg / max</small><strong id="pfExposure">&#8212;</strong><span id="pfLimits"></span></div>
               <div><small>Diversification ratio</small><strong id="pfDiversification">&#8212;</strong><span>&#931; weighted &#963; &#247; portfolio &#963; &#183; &gt;1 = diversified</span></div>
             </div>
             <div class="pf-chart"><div class="pf-chart-head"><span class="sl-label">Cumulative P&amp;L &#183; DKK</span><span class="pf-legend"><i class="pf-l-book"></i>Netted book <i class="pf-l-sum"></i>Sum of stand-alone <i class="pf-l-exp"></i>Net exposure</span></div><canvas id="portfolioCanvas" role="img" aria-label="Cumulative portfolio P&amp;L against the sum of stand-alone runs, with net exposure bars"></canvas></div>

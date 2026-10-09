@@ -532,20 +532,23 @@
     if(!sig)return;
     if(sig.error){el('rbSigVerdict').textContent=sig.error;return;}
     const tried=triedRules.size, pText=p=>p<0.001?'< 0.001':p.toFixed(3), pClass=p=>p<0.05?'p-strong':p<0.10?'p-weak':'p-none';
-    const rows=[
-      ['Daily t-test','Mean daily P&L is zero',`${format(sig.mean_daily)} ± ${format(sig.sd_daily)} DKK/day over ${sig.days} days · t = ${format(sig.t_stat)}`,sig.p_daily],
+    const permutations=Boolean(sig.day_shuffle&&sig.timing_shift);
+    const rows=[['Daily t-test','Mean daily P&L is zero',`${format(sig.mean_daily)} ± ${format(sig.sd_daily)} DKK/day over ${sig.days} days · t = ${format(sig.t_stat)}`,sig.p_daily]];
+    if(permutations)rows.push(
       ['Day shuffle','Today’s forecast adds nothing beyond the typical daily price shape',`${format(sig.actual_gross)} DKK actual vs ${format(sig.day_shuffle.null_mean)} with another day’s positions`,sig.day_shuffle.p],
-      ['Timing shift','Timing within the day does not matter',`${format(sig.actual_gross)} DKK actual vs ${format(sig.timing_shift.null_mean)} with positions shifted within the day`,sig.timing_shift.p],
-    ];
+      ['Timing shift','Timing within the day does not matter',`${format(sig.actual_gross)} DKK actual vs ${format(sig.timing_shift.null_mean)} with positions shifted within the day`,sig.timing_shift.p]);
     if(tried>1)rows.push(['Multiple testing',`Best of ${tried} rules tried this session`,`Bonferroni: daily p × ${tried}`,Math.min(1,sig.p_daily*tried)]);
     for(const [test,hypothesis,evidence,p] of rows){
       const tr=document.createElement('tr');
       for(const value of [test,hypothesis,evidence,pText(p)]){const td=document.createElement('td');td.textContent=value;tr.append(td);}
       tr.lastChild.className=pClass(p);body.append(tr);
     }
-    const p=sig.p_daily,shuffle=sig.day_shuffle.p;
+    const p=sig.p_daily,shuffle=permutations?sig.day_shuffle.p:null;
     let verdict;
-    if(p<0.05&&shuffle<0.05)verdict='Significant at 5%: the mean P&L is positive, and the day-specific forecast adds value beyond the typical daily price shape.';
+    if(!permutations)verdict=(p<0.05?'The mean daily P&L is significant at 5%.':`Not significant at 5% over ${sig.days} days, so chance cannot be ruled out.`
+      +(sig.days_needed_80pct_power?` At the current daily Sharpe (${format(sig.daily_sharpe)}), about ${sig.days_needed_80pct_power} days of data would give an 80% chance of detecting the edge.`:''))
+      +' The day-shuffle and timing-shift tests move positions between intervals, which a battery cannot do without breaking its state of charge, so they run for Prop proxy only.';
+    else if(p<0.05&&shuffle<0.05)verdict='Significant at 5%: the mean P&L is positive, and the day-specific forecast adds value beyond the typical daily price shape.';
     else if(p<0.05)verdict='The mean P&L is significantly positive, but shuffling days keeps most of it: the edge is mainly the typical daily price shape, not day-specific forecast skill.';
     else verdict=`Not significant at 5% over ${sig.days} days, so chance cannot be ruled out.`
       +(sig.days_needed_80pct_power?` At the current daily Sharpe (${format(sig.daily_sharpe)}), about ${sig.days_needed_80pct_power} days of data would give an 80% chance of detecting the edge.`:'')
@@ -603,11 +606,52 @@
     }
     return book;
   }
+  // One shared battery: the runs' weighted MW requests are netted each interval (charge negative, discharge
+  // positive) and the battery executes the net within its power and state-of-charge limits, like the run itself.
+  function simulateBatteryBook(members,weights) {
+    const rows=members[0].intervals, n=rows.length, cap=Number(el('pfCap').value)||0, lossLimit=Number(el('pfLoss').value)||0;
+    const cfg=members[0].settings.battery, step=0.25, fees=s=>[(s.fee_per_mwh||0)+s.charge_fee_per_mwh,(s.fee_per_mwh||0)+s.discharge_fee_per_mwh];
+    const [chargeFee,dischargeFee]=fees(cfg);
+    const book={cash:new Array(n),net:new Array(n),cost:new Array(n),standalone:new Array(n),standaloneCost:new Array(n),netTurnover:new Array(n),grossTurnover:new Array(n),soc:new Array(n),capped:0,riskOff:0};
+    let soc=Math.min(Math.max(cfg.initial_soc_mwh||0,0),cfg.capacity_mwh),day='',dayPnl=0;
+    for(let t=0;t<n;t++){
+      const row=rows[t];let request=0,standalone=0,standaloneCost=0,grossTurnover=0;
+      members.forEach((run,i)=>{
+        const r=run.intervals[t],mw=weights[i]*(r.Dispatch_MW||0),[cf,df]=fees(run.settings.battery);
+        request+=mw;standalone+=weights[i]*r.Cashflow;standaloneCost+=Math.abs(mw)*step*(mw<0?cf:df);grossTurnover+=Math.abs(mw)*step;
+      });
+      let power=Math.min(Math.abs(request),cfg.power_mw);
+      if(cap>0&&Math.abs(request)>cap){power=Math.min(power,cap);book.capped++;}
+      // The daily loss limit uses UTC dates, as in the battery simulator; the battery keeps its charge while idle.
+      const date=row.HourUTC.slice(0,10);if(date!==day){day=date;dayPnl=0;}
+      let dispatch=0,cost=0,cash=0;
+      if(lossLimit>0&&dayPnl<=-lossLimit)book.riskOff++;
+      else if(request<0&&soc<cfg.capacity_mwh){
+        dispatch=-Math.min(power,(cfg.capacity_mwh-soc)/(step*cfg.charge_efficiency));const energy=-dispatch*step;
+        soc+=energy*cfg.charge_efficiency;cost=energy*chargeFee;cash=-energy*row.Actual_Price-cost;
+      }else if(request>0&&soc>0){
+        dispatch=Math.min(power,soc*cfg.discharge_efficiency/step);const energy=dispatch*step;
+        soc-=energy/cfg.discharge_efficiency;cost=energy*dischargeFee;cash=energy*row.Actual_Price-cost;
+      }
+      soc=Math.min(Math.max(soc,0),cfg.capacity_mwh);dayPnl+=cash;
+      // Charging buys power, so it is drawn like a long position.
+      book.net[t]=-dispatch;book.cost[t]=cost;book.cash[t]=cash;book.soc[t]=soc;book.netTurnover[t]=Math.abs(dispatch)*step;
+      book.standalone[t]=standalone;book.standaloneCost[t]=standaloneCost;book.grossTurnover[t]=grossTurnover;
+    }
+    return book;
+  }
   function sum(values,from,to){let total=0;for(let i=from;i<to;i++)total+=values[i];return total;}
   function renderPortfolio() {
-    const ready=runs.length>=2&&runs[0].intervals[0]?.Position_MWh!==undefined&&runs[0].intervals[0]?.Is_Day_End!==undefined;
-    el('pfEmpty').textContent=isBattery(result)?'The book nets Prop proxy runs. Switch the setup to Prop proxy to build one.'
-      :'Run at least two strategies (press two cards in the library) to build a portfolio.';
+    const battery=isBattery(runs[0]), first=runs[0]?.intervals[0];
+    const ready=runs.length>=2&&(battery?first?.Dispatch_MW!==undefined&&Boolean(runs[0].settings.battery)
+      :first?.Position_MWh!==undefined&&first?.Is_Day_End!==undefined);
+    el('pfEmpty').textContent='Run at least two strategies (press two cards in the library) to build a portfolio.';
+    el('pfIntro').textContent=battery
+      ?'One shared battery runs the whole book: each run’s charge and discharge requests are added up per 15-minute interval, so opposite requests cancel before fees and losses. The battery then executes the net request within its power and state-of-charge limits. Results follow the chart window.'
+      :'Positions from the selected runs are added up per 15-minute interval, so opposite trades cancel before costs. The book is re-simulated with the same rules: next day-ahead move, imbalance close at day end, costs on every MWh change. Results follow the chart window.';
+    el('pfCapLabel').textContent=battery?'Power cap · MW':'Net cap · MWh';
+    el('pfExposureLabel').textContent=battery?'Net dispatch · avg / max':'Net exposure · avg / max';
+    el('pfSavedLabel').textContent=battery?'Fees avoided · one battery':'Costs saved by netting';
     el('pfEmpty').hidden=ready; el('pfBody').hidden=!ready;
     maybeFillBook();
     if(!ready){bookKey='';return;}
@@ -649,7 +693,7 @@
       el('pfNotes').textContent='Include at least one run with a weight above 0.';el('pfCorr').replaceChildren();drawPortfolio(null,0,0);return;
     }
     scheduleBookRobustness(members,weights);
-    const book=simulateBook(members,weights);
+    const book=battery?simulateBatteryBook(members,weights):simulateBook(members,weights);
     const pnl=sum(book.cash,from,to), standalone=sum(book.standalone,from,to), saved=sum(book.standaloneCost,from,to)-sum(book.cost,from,to);
     let cumulative=0,peak=0,drawdown=0,exposureSum=0,exposureMax=0;
     for(let t=from;t<to;t++){cumulative+=book.cash[t];peak=Math.max(peak,cumulative);drawdown=Math.max(drawdown,peak-cumulative);const absolute=Math.abs(book.net[t]);exposureSum+=absolute;exposureMax=Math.max(exposureMax,absolute);}
@@ -658,10 +702,10 @@
     el('pfPnlNote').textContent=`${label}, netted, after costs`;
     el('pfStandalone').textContent=format(standalone);el('pfStandalone').className=standalone>0?'positive':standalone<0?'negative':'';
     el('pfSaved').textContent=format(saved);
-    el('pfTurnover').textContent=`${format(sum(book.netTurnover,from,to))} MWh traded vs ${format(sum(book.grossTurnover,from,to))} separately`;
+    el('pfTurnover').textContent=`${format(sum(book.netTurnover,from,to))} MWh ${battery?'dispatched':'traded'} vs ${format(sum(book.grossTurnover,from,to))} separately${battery?' (netting plus energy one battery could not deliver)':''}`;
     el('pfDrawdown').textContent=format(drawdown);
-    el('pfExposure').textContent=to>from?`${compact(exposureSum/(to-from))} / ${compact(exposureMax)} MWh`:'—';
-    el('pfLimits').textContent=`Cap hit ${book.capped}× · loss limit flat ${book.riskOff}× (whole test)`;
+    el('pfExposure').textContent=to>from?`${compact(exposureSum/(to-from))} / ${compact(exposureMax)} ${battery?'MW':'MWh'}`:'—';
+    el('pfLimits').textContent=`Cap hit ${book.capped}× · loss limit ${battery?'idle':'flat'} ${book.riskOff}× (whole test)`;
     // Diversification and correlation use hourly P&L over the whole test.
     const hourly=members.map(hourlyPnl), combined=hourly[0].map((_,h)=>hourly.reduce((total,series,i)=>total+weights[i]*series[h],0));
     const bookSigma=stdev(combined), weightedSigma=sigmas.reduce((total,sigma,i)=>total+weights[i]*sigma,0);
@@ -677,8 +721,14 @@
       tbody.append(tr);
     });
     table.append(thead,tbody);
-    const costs=new Set(members.map(run=>run.settings.prop.transaction_cost_dkk_per_mwh));
-    el('pfNotes').textContent=`Weights scale each run’s MWh. Inverse-volatility weights, σ, correlation and the diversification ratio use the whole test (in-sample) on ${combined.length} hourly observations, so treat them as illustrative.${costs.size>1?' Runs use different transaction costs; the book uses the first included run’s rate.':''} Negative correlation (green) diversifies; positive (blue) concentrates.`;
+    const inSample=`Inverse-volatility weights, σ, correlation and the diversification ratio use the whole test (in-sample) on ${combined.length} hourly observations, so treat them as illustrative.`;
+    if(battery){
+      const spec=members[0].settings.battery, batteries=new Set(members.map(run=>JSON.stringify(run.settings.battery)));
+      el('pfNotes').textContent=`Weights scale each run’s MW requests. The book has one battery (${format(spec.capacity_mwh)} MWh, ${format(spec.power_mw)} MW), so when the weighted requests add up to more than its power or state of charge allows, it delivers less than the runs did on their own: the sum of stand-alone runs assumes one battery per run. ${inSample}${batteries.size>1?' Runs use different battery settings; the book uses the first included run’s.':''} Negative correlation (green) diversifies; positive (blue) concentrates.`;
+    }else{
+      const costs=new Set(members.map(run=>run.settings.prop.transaction_cost_dkk_per_mwh));
+      el('pfNotes').textContent=`Weights scale each run’s MWh. ${inSample}${costs.size>1?' Runs use different transaction costs; the book uses the first included run’s rate.':''} Negative correlation (green) diversifies; positive (blue) concentrates.`;
+    }
     drawPortfolio(book,from,to);
   }
   // ---- Book slots: five starter strategies when the book comes into view, each replaceable from its row ----
@@ -700,15 +750,15 @@
     data.request=payload;return data;
   }
   async function maybeFillBook() {
-    if(filling||!bookVisible||!result||busy||isBattery(result)||runs.length>=5)return;
+    if(filling||!bookVisible||!result||busy||runs.length>=5)return;
     const missing=starterBook.filter(name=>!runs.some(run=>run.name===name)).slice(0,5-runs.length);
     if(!missing.length)return;
-    filling=true;const fillStatus=el('pfFillStatus');fillStatus.hidden=false;
+    filling=true;const fillStatus=el('pfFillStatus');fillStatus.hidden=false;const setup=result.trading_setup;
     try{
       for(const [i,name] of missing.entries()){
         fillStatus.textContent=`Loading starter strategies for the book… ${i+1} / ${missing.length}`;
         const data=await runPreset(presets.find(p=>p.name===name));
-        if(isBattery(result))break;
+        if(result?.trading_setup!==setup)break;  // the setup was switched while loading
         insertRun(data,{makeCurrent:false});
         if(result)render();
       }
@@ -755,7 +805,7 @@
     if(state.status==='loading'){status.textContent='Updating book robustness…';return;}
     if(state.status==='error'){status.textContent=`Book robustness unavailable: ${state.message}`;return;}
     const {periods,significance:sig,members}=state.data;
-    status.textContent=`${members} runs netted with the weights, cap and loss limit above · recomputed on every change`;
+    status.textContent=`${members} runs netted${state.data.trading_setup==='battery'?' into one shared battery':''} with the weights, cap and loss limit above · recomputed on every change`;
     const row=(cells,classes=[])=>{const tr=document.createElement('tr');cells.forEach((value,i)=>{const td=document.createElement('td');td.textContent=value;if(classes[i])td.className=classes[i];tr.append(td);});return tr;};
     for(const key of ['earlier','test']){
       const p=periods[key],sign=p.total_cashflow>0?'positive':p.total_cashflow<0?'negative':'';
@@ -764,8 +814,9 @@
     if(sig&&!sig.error){
       for(const [name,evidence,p] of [
         ['Daily t-test',`${format(sig.mean_daily)} ± ${format(sig.sd_daily)} DKK/day over ${sig.days} days`,sig.p_daily],
-        ['Day shuffle',`${format(sig.actual_gross)} actual vs ${format(sig.day_shuffle.null_mean)} with another day’s positions`,sig.day_shuffle.p],
-        ['Timing shift',`${format(sig.actual_gross)} actual vs ${format(sig.timing_shift.null_mean)} shifted within the day`,sig.timing_shift.p],
+        ...(sig.day_shuffle&&sig.timing_shift?[
+          ['Day shuffle',`${format(sig.actual_gross)} actual vs ${format(sig.day_shuffle.null_mean)} with another day’s positions`,sig.day_shuffle.p],
+          ['Timing shift',`${format(sig.actual_gross)} actual vs ${format(sig.timing_shift.null_mean)} shifted within the day`,sig.timing_shift.p]]:[]),
       ])sigBody.append(row([name,evidence,pValueText(p)],['','',pValueClass(p)]));
     }
     const early=periods.earlier,late=periods.test;
@@ -773,7 +824,7 @@
     el('pfRobustVerdict').textContent=(both?`The book is profitable in both periods (${format(early.pnl_per_day)} and ${format(late.pnl_per_day)} DKK/day). `
       :`The book is not profitable in both periods (${format(early.pnl_per_day)} and ${format(late.pnl_per_day)} DKK/day). `)
       +(sig&&!sig.error?(sig.p_daily<0.05?'Its mean daily P&L is significant at 5%':'Its mean daily P&L is not significant at 5%')
-      +(sig.day_shuffle.p<0.05?', and the day-specific forecasts add value beyond the daily price shape.':'; shuffling days keeps most of it, so the edge is mainly the daily price shape.'):'');
+      +(!sig.day_shuffle?' (permutation tests run for Prop proxy only).':sig.day_shuffle.p<0.05?', and the day-specific forecasts add value beyond the daily price shape.':'; shuffling days keeps most of it, so the edge is mainly the daily price shape.'):'');
   }
 
   function drawPortfolio(book,from,to) {
@@ -796,7 +847,7 @@
     const maxNet=Math.max(1,...book.net.map(Math.abs)),mid=(barTop+bottom)/2,barWidth=Math.max(1,width/n);
     for(let t=0;t<to;t++){const h=book.net[t]/maxNet*(bottom-barTop)/2;if(!h)continue;ctx.fillStyle=h>0?'rgba(79,224,176,.55)':'rgba(255,143,171,.55)';ctx.fillRect(x(t),h>0?mid-h:mid,barWidth,Math.abs(h));}
     ctx.fillStyle='#9aa8cc';ctx.textAlign='left';
-    ctx.fillText(compact(hi),right+8,top+8);ctx.fillText(compact(lo),right+8,lineBottom);ctx.fillText(`±${compact(maxNet)} MWh`,right+8,mid+4);
+    ctx.fillText(compact(hi),right+8,top+8);ctx.fillText(compact(lo),right+8,lineBottom);ctx.fillText(`±${compact(maxNet)} ${book.soc?'MW':'MWh'}`,right+8,mid+4);
   }
   ['pfWeighting','pfCap','pfLoss'].forEach(id=>el(id).addEventListener('input',()=>{if(result)renderPortfolio();}));
   // Enter in a portfolio input must not submit the backtest form.

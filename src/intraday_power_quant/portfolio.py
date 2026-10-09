@@ -7,8 +7,12 @@ exposure and an optional daily loss limit flattens the book for the rest of the 
 """
 from __future__ import annotations
 
+from dataclasses import replace
+
 import numpy as np
 import pandas as pd
+
+from .trading import BatteryConfig, _simulate_battery_dispatch
 
 REQUIRED = ["HourUTC", "Position_MWh", "Cashflow", "Actual_Price", "Imbalance_Spread_DKK", "Is_Day_End"]
 
@@ -63,10 +67,39 @@ def simulate_book(runs: list[pd.DataFrame], weights: list[float], cost_rate: flo
     return book
 
 
+def simulate_battery_book(runs: list[pd.DataFrame], weights: list[float], battery: BatteryConfig,
+                          cap_mw: float = 0.0, daily_loss_limit: float = 0.0) -> pd.DataFrame:
+    """One shared battery for the whole book.
+
+    Each interval the runs' weighted dispatch requests are netted (charging requests are negative MW,
+    discharging positive), and the battery executes the net within its power and state-of-charge limits, with
+    an optional extra power cap. A daily loss limit idles the battery for the rest of the day while keeping its
+    state of charge. Fees are paid on the energy actually moved, so opposite requests that cancel save fees.
+    """
+    for run in runs:
+        if "Dispatch_MW" not in run.columns:
+            raise KeyError("Battery portfolio runs need Dispatch_MW.")
+    runs = align_runs(runs)
+    reference = runs[0]
+    request = sum(w * run["Dispatch_MW"].to_numpy(float) for w, run in zip(weights, runs))
+    power = np.abs(request)
+    if cap_mw > 0:
+        power = np.minimum(power, cap_mw)
+    frame = reference[["HourUTC", "Actual_Price"]].copy()
+    frame["Book_Request"] = np.where(request < 0, "charge", np.where(request > 0, "discharge", "hold"))
+    frame["Requested_Power_MW"] = power
+    config = replace(battery, max_daily_loss=daily_loss_limit or None)
+    book, _ = _simulate_battery_dispatch(frame, config, "HourUTC", "Actual_Price", "Book_Request")
+    book["Standalone_Cashflow"] = sum(w * run["Cashflow"].to_numpy(float) for w, run in zip(weights, runs))
+    book.attrs.update(capped=int((cap_mw > 0) * (np.abs(request) > cap_mw).sum()),
+                      risk_off=int((book["Action"] == "risk-off").sum()))
+    return book
+
+
 def book_period_summary(book: pd.DataFrame) -> dict[str, float | int | str | None]:
     days = pd.to_datetime(book["HourUTC"], utc=True).dt.tz_convert("Europe/Copenhagen").dt.date.nunique()
     cumulative = book["Cashflow"].cumsum()
-    active = book["Position_MWh"] != 0
+    active = book["Position_MWh"] != 0 if "Position_MWh" in book else book["Dispatch_MW"] != 0
     total = float(book["Cashflow"].sum())
     return {
         "start": pd.Timestamp(book["HourUTC"].min()).isoformat(), "end": pd.Timestamp(book["HourUTC"].max()).isoformat(),

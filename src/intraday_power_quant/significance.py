@@ -47,10 +47,15 @@ def _derangements(rng: np.random.Generator, days: int, count: int) -> np.ndarray
 
 
 def significance_tests(intervals: pd.DataFrame, permutations: int = 2000, seed: int = 7) -> dict | None:
-    """p-values for a Prop proxy run, using complete Copenhagen delivery days only."""
-    required = {"HourUTC", "Cashflow", "Position_MWh", "Actual_Price", "Imbalance_Spread_DKK"}
-    if not required.issubset(intervals.columns):
+    """p-values using complete Copenhagen delivery days only.
+
+    The daily t-test needs only cashflows, so it also covers battery runs. The permutation tests reuse a run's
+    positions on other prices, which needs Prop proxy positions; for battery runs (whose dispatch depends on
+    the state of charge) they are left as ``None``.
+    """
+    if not {"HourUTC", "Cashflow"}.issubset(intervals.columns):
         return None
+    has_positions = {"Position_MWh", "Actual_Price", "Imbalance_Spread_DKK"}.issubset(intervals.columns)
     frame = intervals.sort_values("HourUTC").reset_index(drop=True)
     day = pd.to_datetime(frame["HourUTC"], utc=True).dt.tz_convert(MARKET_TIMEZONE).dt.date
     complete = day.groupby(day).transform("size") == INTERVALS_PER_DAY
@@ -65,6 +70,14 @@ def significance_tests(intervals: pd.DataFrame, permutations: int = 2000, seed: 
     daily_sharpe = mean / sd if sd > 0 else None
     days_needed = (math.ceil(((_Z_ALPHA_5PCT_ONE_SIDED + _Z_POWER_80PCT) / daily_sharpe) ** 2)
                    if daily_sharpe and daily_sharpe > 0 else None)
+
+    daily_result = {
+        "days": int(days), "mean_daily": mean, "sd_daily": sd, "t_stat": float(t_stat),
+        "p_daily": t_survival(float(t_stat), days - 1), "daily_sharpe": daily_sharpe,
+        "days_needed_80pct_power": days_needed,
+    }
+    if not has_positions:
+        return {**daily_result, "permutations": 0, "actual_gross": None, "day_shuffle": None, "timing_shift": None}
 
     exposure = frame["Position_MWh"].to_numpy(float).reshape(days, INTERVALS_PER_DAY)
     price = frame["Actual_Price"].to_numpy(float).reshape(days, INTERVALS_PER_DAY)
@@ -90,13 +103,7 @@ def significance_tests(intervals: pd.DataFrame, permutations: int = 2000, seed: 
         return float((1 + (null >= actual_gross).sum()) / (1 + len(null)))
 
     return {
-        "days": int(days),
-        "mean_daily": mean,
-        "sd_daily": sd,
-        "t_stat": float(t_stat),
-        "p_daily": t_survival(float(t_stat), days - 1),
-        "daily_sharpe": daily_sharpe,
-        "days_needed_80pct_power": days_needed,
+        **daily_result,
         "permutations": permutations,
         "actual_gross": actual_gross,
         "day_shuffle": {"null_mean": float(shuffled.mean()), "p": permutation_p(shuffled)},
