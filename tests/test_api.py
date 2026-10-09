@@ -101,7 +101,7 @@ def test_strategy_comparison_uses_all_strategy_families() -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["dataset"]["selected_rows"] > 600
-    assert len(payload["strategies"]) == 16
+    assert len(_benchmark_rows(payload)) == 16
     assert any(row["Strategy"] == "Predicted best hours" for row in payload["strategies"])
     assert any(row["Strategy"] == "Wind signal" for row in payload["strategies"])
     assert any(row["Strategy"] == "Rolling price optimizer" for row in payload["strategies"])
@@ -192,7 +192,7 @@ def test_prop_comparison_returns_directional_accounting() -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["trading_setup"] == "prop"
-    assert len(payload["strategies"]) == 12
+    assert len(_benchmark_rows(payload)) == 12
     selected = next(
         row for row in payload["strategies"] if row["Strategy"] == "Daily spread rank"
     )
@@ -247,7 +247,7 @@ def test_imbalance_comparison_returns_spread_accounting() -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["trading_setup"] == "imbalance"
-    assert len(payload["strategies"]) == 12
+    assert len(_benchmark_rows(payload)) == 12
     assert payload["perfect_foresight_benchmark"]["label"] == (
         "Perfect-foresight unclosed-position settlement ceiling"
     )
@@ -262,8 +262,13 @@ def test_imbalance_comparison_returns_spread_accounting() -> None:
     }.issubset(selected[0])
 
 
+def _benchmark_rows(payload: dict) -> list[dict]:
+    """Tuned benchmark strategies, without the Strategy Lab presets that run alongside them."""
+    return [row for row in payload["strategies"] if row["Source"] == "Benchmark"]
+
+
 def test_saved_comparisons_are_available_without_recalculation() -> None:
-    for setup, expected_count in (("battery", 16), ("prop", 12), ("imbalance", 12)):
+    for setup, expected_count, lab_count in (("battery", 16, 10), ("prop", 12, 12), ("imbalance", 12, 10)):
         response = client.get(f"/api/saved-comparison/{setup}")
         assert response.status_code == 200
         payload = response.json()
@@ -271,11 +276,12 @@ def test_saved_comparisons_are_available_without_recalculation() -> None:
         assert payload["trading_setup"] == setup
         assert payload["evaluation"]["test_days"] == 10
         assert payload["evaluation"]["daily_observations"] == 20  # 2 walk-forward blocks of 10 days
-        assert len(payload["strategies"]) == expected_count
+        assert len(_benchmark_rows(payload)) == expected_count
+        assert len(payload["strategies"]) == expected_count + lab_count  # plus the Strategy Lab presets
         assert payload["request"]["days"] == 40  # matches the dashboard's default history window
         if setup == "battery":
-            assert math.isclose(payload["strategies"][0]["Cashflow"], 4281.855638, rel_tol=1e-9)
-        assert all(len(row["Walk_Forward_Blocks"]) == 2 for row in payload["strategies"])
+            assert math.isclose(_benchmark_rows(payload)[0]["Cashflow"], 4281.855638, rel_tol=1e-9)
+        assert all(len(row["Walk_Forward_Blocks"]) == 2 for row in _benchmark_rows(payload))
         assert set(payload["strategy_series"]) == {
             row["Strategy"] for row in payload["strategies"]
         }

@@ -3,7 +3,8 @@
   "functions": {
     "api/index.py": {
       "maxDuration": 300,
-      "excludeFiles": "{tests/**,notebooks/**,scripts/**,data/**,outputs/**,reports/**,src/intraday_power_quant/streamlit_app.py}"
+      "excludeFiles": "{tests/**,notebooks/**,scripts/**,data/**,outputs/**,reports/**,src/intraday_power_quant/streamlit_app.py}",
+      "includeFiles": "public/strategy-presets.json"
     }
   },
   "rewrites": [

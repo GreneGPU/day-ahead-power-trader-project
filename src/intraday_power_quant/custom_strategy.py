@@ -196,14 +196,16 @@ def requested_actions(signal: pd.Series, request: CustomStrategyRequest) -> np.n
     return np.select([buy, sell], ["charge", "discharge"], default="hold")
 
 
-def run_custom_strategy(frame: pd.DataFrame, request: CustomStrategyRequest):
+def run_custom_strategy(frame: pd.DataFrame, request: CustomStrategyRequest,
+                        battery: BatteryConfig | None = None, prop: PropConfig | None = None):
+    """Backtest the rule. ``battery``/``prop`` override the request's own settings (used by the benchmarks)."""
     if request.signal == "formula" and not np.isfinite(frame["Custom_Signal"]).all():
         raise ValueError("Formula inputs must cover every interval in the selected test period with finite values.")
     if request.signal == "csv" and frame["Custom_Signal"].isna().any():
         raise ValueError("CSV must supply a signal for every interval in the selected test period.")
     if request.trading_setup == "battery":
         intervals, summary = _simulate_battery_dispatch(
-            frame, BatteryConfig(**request.battery.model_dump()),
+            frame, battery or BatteryConfig(**request.battery.model_dump()),
             "HourUTC", "Actual_Price", "Requested_Action",
         )
     else:
@@ -211,7 +213,7 @@ def run_custom_strategy(frame: pd.DataFrame, request: CustomStrategyRequest):
         frame["Signal_Action"] = frame["Requested_Action"]
         frame["Size_Multiplier"] = size_multipliers(frame["Custom_Signal"], request)
         intervals, summary = simulate_prop_positions_with_eod_imbalance(
-            frame, PropConfig(**request.prop.model_dump()),
+            frame, prop or PropConfig(**request.prop.model_dump()),
         )
     cumulative = intervals["Cumulative_Cashflow"]
     # Include starting cashflow of zero in drawdown, including a first-interval loss.

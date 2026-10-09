@@ -33,6 +33,7 @@ from intraday_power_quant.custom_strategy import (
 )
 from intraday_power_quant.latest_prices import latest_prices
 from intraday_power_quant.portfolio import book_period_summary, simulate_battery_book, simulate_book
+from intraday_power_quant.lab_presets import LAB_NOTE, preset_rule_text, presets_for_setup, run_presets
 from intraday_power_quant.significance import significance_tests
 from intraday_power_quant.tuning import (
     DailyPnlCapture,
@@ -584,15 +585,17 @@ def _stitched_summary(
 def compare_strategies(payload: StrategyComparisonRequest) -> dict[str, Any]:
     if payload.forecast_col not in FORECAST_COLUMNS:
         raise HTTPException(status_code=422, detail=f"Unknown forecast column: {payload.forecast_col}")
-    if payload.strategy is not None and payload.strategy not in STRATEGY_DESCRIPTIONS:
-        raise HTTPException(status_code=422, detail=f"Unknown strategy: {payload.strategy}")
     trading_setup = payload.trading_setup.lower().replace("-", "_")
     if trading_setup not in {"battery", "prop", "imbalance"}:
         raise HTTPException(status_code=422, detail=f"Unknown trading setup: {payload.trading_setup}")
+    lab_names = {preset["name"] for preset in presets_for_setup(trading_setup)}
+    if payload.strategy is not None and payload.strategy not in STRATEGY_DESCRIPTIONS and payload.strategy not in lab_names:
+        raise HTTPException(status_code=422, detail=f"Unknown strategy: {payload.strategy}")
     is_prop = trading_setup == "prop"
     is_imbalance = trading_setup == "imbalance"
     is_directional = is_prop or is_imbalance
-    if is_directional and payload.strategy is not None and payload.strategy not in PROP_STRATEGIES:
+    if (is_directional and payload.strategy is not None and payload.strategy not in PROP_STRATEGIES
+            and payload.strategy not in lab_names):
         raise HTTPException(
             status_code=422,
             detail=f"Strategy is battery-only and unavailable in {trading_setup} mode: {payload.strategy}",
@@ -806,6 +809,33 @@ def compare_strategies(payload: StrategyComparisonRequest) -> dict[str, Any]:
                     ),
                     "Evaluations": 1,
                 }
+        # Strategy Lab presets: fixed rules, run over the whole window (so lagged signals and the battery's
+        # state of charge carry over as for the other strategies) and scored on the same days.
+        lab_descriptions: dict[str, str] = {}
+        for name, (preset, simulation, no_fee_simulation) in run_presets(
+            history, trading_setup, battery, prop, payload.forecast_col
+        ).items():
+            forecast_col = preset.get("forecast", payload.forecast_col)
+            simulation = simulation.merge(
+                history[["HourUTC", forecast_col]].rename(columns={forecast_col: "Forecast_Price"}), on="HourUTC", how="left"
+            )
+            piece = simulation[simulation["HourUTC"].isin(selected["HourUTC"])].reset_index(drop=True)
+            no_fee_cash = no_fee_simulation.loc[no_fee_simulation["HourUTC"].isin(selected["HourUTC"]), "Cashflow"].cumsum()
+            suite[name] = (piece, _stitched_summary(piece, is_directional, battery, prop, 0.0))
+            lab_descriptions[name] = preset["desc"] + LAB_NOTE
+            rule = f"{preset_rule_text(preset)} · forecast: {FORECAST_COLUMNS.get(forecast_col, forecast_col)}"
+            rule_json = json.dumps(preset, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+            optimization_meta[name] = {
+                "Settings": rule, "Settings_JSON": rule_json,
+                "Train_Cashflow": None, "Train_Max_Drawdown": None, "Train_Days": None, "OOS_Kept_Pct": None,
+                "Walk_Forward_Blocks": [],
+                "Test_Potential_Cashflow": None, "Test_Potential_Max_Drawdown": None,
+                "Test_Potential_Settings": None, "Test_Potential_Settings_JSON": None,
+                "No_Fee_Potential_Cashflow": float(no_fee_cash.iloc[-1]) if len(no_fee_cash) else 0.0,
+                "No_Fee_Potential_Max_Drawdown": float((no_fee_cash.cummax() - no_fee_cash).max()) if len(no_fee_cash) else 0.0,
+                "No_Fee_Potential_Settings": rule, "No_Fee_Potential_Settings_JSON": rule_json,
+                "Evaluations": 1,
+            }
     except (KeyError, TypeError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -813,7 +843,7 @@ def compare_strategies(payload: StrategyComparisonRequest) -> dict[str, Any]:
     simulations: dict[str, pd.DataFrame] = {}
     for name, (simulation, summary) in suite.items():
         risk = summarize_cashflow_risk(simulation)
-        description = STRATEGY_DESCRIPTIONS[name]
+        description = lab_descriptions.get(name) or STRATEGY_DESCRIPTIONS[name]
         if is_prop:
             description += (
                 " In the prop proxy, buy/charge signals map to long positions and "
@@ -836,6 +866,7 @@ def compare_strategies(payload: StrategyComparisonRequest) -> dict[str, Any]:
         comparison.append(
             {
                 "Strategy": name,
+                "Source": "Strategy Lab" if name in lab_descriptions else "Benchmark",
                 "Description": description,
                 "Cashflow": float(summary["total_cashflow"]),
                 "Max_Drawdown": float(summary["max_drawdown"]),
