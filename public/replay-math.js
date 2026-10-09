@@ -15,7 +15,8 @@
         peak = Math.max(peak, pnl);
         drawdown = Math.max(drawdown, peak - pnl);
         fees += row.Transaction_Cost || 0;
-        active += Number(row.Position !== 0);
+        // Prop runs have a position; battery runs are active while charging or discharging.
+        active += Number(row.Position !== undefined ? row.Position !== 0 : Boolean(row.Dispatch_MW));
         warmup += Number(row.Custom_Signal == null);
       }
       return {total_cashflow:pnl,max_drawdown:drawdown,total_fee_cost:fees,

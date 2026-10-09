@@ -100,25 +100,41 @@
     observer.observe(el('replayWorkspace'));
   }
   function pauseReplay() {clearInterval(replayTimer);replayTimer=null;el('replayPlay').textContent='Play';}
-  function addRun(data) {
-    pauseReplay();
-    const signature=data.intervals.map(row=>row.HourUTC).join('|');
+  function addRun(data) {pauseReplay();insertRun(data);}
+  // Add a run to the comparison and book. Runs on other timestamps or another setup start a new comparison;
+  // the same rule run again replaces its earlier copy, so it is never counted twice. With ``slot`` the run
+  // replaces that book slot; with makeCurrent false the replay keeps showing the current run.
+  function insertRun(data,{makeCurrent=true,slot=null}={}) {
+    const signature=(data.trading_setup||'')+'|'+data.intervals.map(row=>row.HourUTC).join('|');
     if(runs.length && runs[0].signature!==signature) runs.length=0;
     data.runId=String(++runSerial); data.signature=signature;
-    // The same rule run again replaces its earlier copy, so it is never counted twice (comparison or book).
     data.ruleKey=ruleKey(data.request);
-    const duplicate=runs.findIndex(run=>run.ruleKey===data.ruleKey);
-    if(duplicate>=0)runs.splice(duplicate,1);
     triedRules.add(data.ruleKey);
-    runs.push(data);if(runs.length>5)runs.shift();
-    result=data;replayCursor=0;
+    const duplicate=runs.findIndex(run=>run.ruleKey===data.ruleKey);
+    if(slot!=null&&slot<runs.length){
+      if(duplicate>=0&&duplicate!==slot)return false;
+      runs[slot]=data;
+    }else{
+      if(duplicate>=0)runs.splice(duplicate,1);
+      runs.push(data);if(runs.length>5)runs.shift();
+    }
+    if(makeCurrent){result=data;replayCursor=0;}
+    else if(!result||!runs.includes(result))result=data;
     el('replayRun').replaceChildren();
     for(const run of runs){const option=document.createElement('option');option.value=run.runId;option.textContent=`#${run.runId} ${run.name}: ${run.settings.signal==='formula'?run.settings.formula:run.settings.signal}`;el('replayRun').append(option);}
-    el('replayRun').value=data.runId;
+    el('replayRun').value=result.runId;
+    return true;
   }
   // A rule's identity is everything in its request except the display name.
   function ruleKey(request) {const {name,...rule}=request||{};return JSON.stringify(rule);}
   function positionName(value) {return value>0?'Long':value<0?'Short':'Flat';}
+  const isBattery=run=>run?.trading_setup==='battery';
+  // +1 buys (long / charge), -1 sells (short / discharge), 0 flat or idle.
+  function direction(row) {return row?.Position!==undefined?Math.sign(row.Position):row?.Action==='charge'?1:row?.Action==='discharge'?-1:0;}
+  function positionText(row,run) {
+    if(isBattery(run))return row?.Action==='charge'?'Charging':row?.Action==='discharge'?'Discharging':'Idle';
+    return positionName(row?.Position||0)+(row?.Size_Multiplier>1?` ${format(row.Size_Multiplier)}×`:'');
+  }
   function renderReplay() {
     el('replayCursor').max=result.intervals.length;el('replayCursor').value=replayCursor;
     const row=result.intervals[replayCursor-1];
@@ -129,10 +145,14 @@
     el('replaySignal').textContent=row?format(row.Custom_Signal):'-';
     el('replayStrength').textContent=strength==null?'-':`${format(strength)}%`;
     el('replayStrength').className=strength>=100?'positive':strength<=-100?'negative':'';
-    el('replayPosition').textContent=positionName(row?.Position||0);
-    el('replayPosition').className=row?.Position>0?'positive':row?.Position<0?'negative':'';
-    el('replayExposure').textContent=row?`${format(row.Position_MWh)} MWh${row.Size_Multiplier>1?` · ${format(row.Size_Multiplier)}×`:''}`:'0 MWh';
-    el('replayAfter').textContent=positionName(row?.Position_After_Settlement||0);
+    const battery=isBattery(result),dir=direction(row);
+    el('replayPositionLabel').textContent=battery?'Battery':'Position';
+    el('replayPosition').textContent=battery?positionText(row,result):positionName(row?.Position||0);
+    el('replayPosition').className=dir>0?'positive':dir<0?'negative':'';
+    el('replayExposure').textContent=battery?`${format(Math.abs(row?.Dispatch_MW||0))} MW`
+      :row?`${format(row.Position_MWh)} MWh${row.Size_Multiplier>1?` · ${format(row.Size_Multiplier)}×`:''}`:'0 MWh';
+    el('replayAfterLabel').textContent=battery?'State of charge':'After settlement';
+    el('replayAfter').textContent=battery?`${format(row?.State_Of_Charge_MWh||0)} MWh`:positionName(row?.Position_After_Settlement||0);
     const netCashflow=row?.Cumulative_Cashflow||0;
     el('replayNetCashflow').textContent=format(netCashflow);
     el('replayNetCashflow').className=netCashflow>0?'positive':netCashflow<0?'negative':'';
@@ -142,7 +162,7 @@
     runs.forEach((run,i)=>{
       const interval=run.intervals[replayCursor-1], strength=interval?ReplayMath.strength(interval.Custom_Signal,run.settings):null;
       const tr=document.createElement('tr');
-      for(const value of [`#${run.runId} ${run.name}`,interval?format(interval.Custom_Signal):'-',strength==null?'-':`${format(strength)}%`,positionName(interval?.Position||0)+(interval?.Size_Multiplier>1?` ${format(interval.Size_Multiplier)}×`:'')]){
+      for(const value of [`#${run.runId} ${run.name}`,interval?format(interval.Custom_Signal):'-',strength==null?'-':`${format(strength)}%`,positionText(interval,run)]){
         const td=document.createElement('td');td.textContent=value;tr.append(td);
       }
       for(const [key] of chartWindows){
@@ -169,8 +189,15 @@
   }
   function updateFields() {
     const csv = el('labSignal').value === 'csv', change = el('labSignal').value === 'forecast_change';
-    el('labSetup').value='prop';
-    const prop = true;
+    const prop = el('labSetup').value === 'prop';
+    if (!prop) el('labSizing').value = 'fixed';
+    el('labSizing').disabled = busy || !prop;
+    document.querySelectorAll('[data-setup]').forEach(button => {button.setAttribute('aria-pressed', String(button.dataset.setup === el('labSetup').value)); button.disabled = busy;});
+    el('strategyLibrary').querySelectorAll('[data-preset]').forEach(card => {
+      const sizingOnly = Boolean(presets[Number(card.dataset.preset)].sizing);
+      card.disabled = busy || (!prop && sizingOnly);
+      card.title = !prop && sizingOnly ? 'Dynamic sizing is available for the Prop proxy only' : '';
+    });
     const formula = el('labSignal').value === 'formula';
     el('labFormulaFields').hidden = !formula; el('labFormulaExtras').hidden = !formula;
     el('labSourceNote').hidden = formula;
@@ -179,7 +206,8 @@
     el('labLookbackFields').hidden = !change;
     el('labBatteryFields').hidden = prop; el('labPropFields').hidden = !prop;
     el('labSizingFields').hidden = el('labSizing').value === 'fixed';
-    el('labSizeSummary').textContent = sizeSummary();
+    el('labSizeSummary').textContent = prop ? sizeSummary()
+      : `battery = ${format(number('labCapacity'))} MWh / ${format(number('labPower'))} MW · ${format(number('labEfficiency'))}% round trip · fees ${format(number('labChargeFee'))} / ${format(number('labSellFee'))} DKK/MWh`;
     for (const id of ['labBatteryFields','labPropFields','labForecastFields','labLookbackFields','labCsvFields','labFormulaFields','labFormulaExtras','labSizingFields']) {
       el(id).querySelectorAll('input,select,textarea,button').forEach(input => { input.disabled = busy || el(id).hidden; });
     }
@@ -243,7 +271,7 @@
   function request() {
     if (number('labLower') >= number('labUpper')) throw new Error('Lower threshold must be below upper threshold.');
     if (el('labSignal').value === 'csv' && !records) throw new Error('Upload a valid signal CSV first.');
-    const sizing = el('labSizing').value;
+    const sizing = el('labSetup').value === 'prop' ? el('labSizing').value : 'fixed';
     if (sizing !== 'fixed' && !(number('labOuterLower') < number('labLower') && number('labUpper') < number('labOuterUpper')))
       throw new Error('Outer thresholds must lie beyond the entry thresholds: outer lower < lower and outer upper > upper.');
     const efficiency = Math.sqrt(number('labEfficiency') / 100);
@@ -316,7 +344,8 @@
     rows.forEach((row,i)=>{
       // Shading deepens with position size, so sized-up intervals stand out.
       const alpha=Math.min(.42,.13*(row.Size_Multiplier||1));
-      ctx.fillStyle=row.Position>0?`rgba(79,224,176,${alpha})`:row.Position<0?`rgba(255,143,171,${alpha})`:'rgba(255,255,255,0)';
+      const dir=direction(row);
+      ctx.fillStyle=dir>0?`rgba(79,224,176,${alpha})`:dir<0?`rgba(255,143,171,${alpha})`:'rgba(255,255,255,0)';
       ctx.fillRect(x(i)-band/2,top,band,priceBottom-top);ctx.fillRect(x(i)-band/2,signalTop,band,bottom-signalTop);
     });
     // Copenhagen midnight separators, labelled when there is room.
@@ -353,7 +382,7 @@
     // Results cover the chart window (e.g. the last 7 days) ending at the replay time.
     const windowKey=el('chartWindow').value, span=spanOf(windowKey), windowName=chartWindows.find(([key])=>key===windowKey)[1];
     const windowed=Number.isFinite(span)?shown.slice(-span):shown;
-    const s=ReplayMath.stats(windowed,result.settings.prop.initial_capital_dkk), prop=true;
+    const prop=!isBattery(result), s=ReplayMath.stats(windowed,result.settings.prop.initial_capital_dkk);
     renderReplay();
     el('replayWorkspace').hidden=false;
     el('labResults').hidden=false; el('labResults').classList.remove('stale'); el('labExport').disabled=false;
@@ -366,7 +395,7 @@
     el('labDrawdown').textContent=format(s.max_drawdown); el('labActive').textContent=format(s.active_intervals);
     el('labWarmup').textContent=`${s.warmup_intervals} warm-up holds · fees ${format(s.total_fee_cost)} DKK`;
     el('labLastLabel').textContent=prop?'Ending equity · DKK':'Final stored energy · MWh';
-    el('labLast').textContent=format(prop?(shown.at(-1)?.Equity_DKK??result.settings.prop.initial_capital_dkk):s.final_soc_mwh);
+    el('labLast').textContent=format(prop?(shown.at(-1)?.Equity_DKK??result.settings.prop.initial_capital_dkk):(shown.at(-1)?.State_Of_Charge_MWh??0));
     el('labLastNote').textContent='Whole test through replay time';
     const label=windowName[0].toUpperCase()+windowName.slice(1);
     el('labPnlNote').textContent=`${label}, after costs`; el('labDrawdownNote').textContent=label;
@@ -408,9 +437,10 @@
     const daily=[],hours=new Map();
     for(const row of rows){
       const cash=row.Cashflow||0,cost=row.Transaction_Cost||0,exposure=row.Position_MWh||0,dayEnd=Boolean(row.Is_Day_End);
-      if(row.Position){active++;if(cash>0)wins++;}
+      if(direction(row)){active++;if(cash>0)wins++;}
       if(cash>0)gains+=cash;else losses-=cash;
-      turnover+=Math.abs(exposure-previous)+(dayEnd?Math.abs(exposure):0);previous=dayEnd?0:exposure;
+      if(isBattery(result))turnover+=Math.abs(row.Dispatch_MW||0)*0.25;
+      else{turnover+=Math.abs(exposure-previous)+(dayEnd?Math.abs(exposure):0);previous=dayEnd?0:exposure;}
       costs+=cost;gross+=cash+cost;
       const hour=row.HourUTC.slice(0,13);hours.set(hour,(hours.get(hour)||0)+cash);
       day+=cash;if(dayEnd){daily.push(day);day=0;}
@@ -424,6 +454,12 @@
     const hourly=[...hours.values()].sort((a,b)=>a-b),tail=Math.max(1,Math.ceil(hourly.length*.05));
     el('rkVar').textContent=hourly.length>=20?`${format(Math.max(0,-hourly[Math.floor(.05*(hourly.length-1))]))} / ${format(Math.max(0,-hourly.slice(0,tail).reduce((a,b)=>a+b,0)/tail))}`:'—';
     const rate=result.settings.prop?.transaction_cost_dkk_per_mwh??0,breakeven=turnover>0?gross/turnover:null;
+    if(isBattery(result)){
+      el('rkBreakeven').textContent='—';el('rkBreakeven').className='';
+      el('rkBreakevenNote').textContent='Prop proxy only: battery fees are part of each charge and discharge';
+      el('rkTurnover').textContent=format(turnover);el('rkCostNote').textContent=`Energy charged + discharged · ${label.toLowerCase()}`;
+      return;
+    }
     el('rkBreakeven').textContent=breakeven==null?'—':format(breakeven);
     el('rkBreakeven').className=breakeven==null?'':breakeven>rate?'positive':'negative';
     el('rkBreakevenNote').textContent=breakeven==null?'No trades in the window':breakeven>rate?`Now ${format(rate)} DKK/MWh · ${rate>0?`${format(breakeven/rate)}× headroom`:'no cost modeled'}`:`Above today’s ${format(rate)} DKK/MWh: costs eat the edge`;
@@ -570,7 +606,10 @@
   function sum(values,from,to){let total=0;for(let i=from;i<to;i++)total+=values[i];return total;}
   function renderPortfolio() {
     const ready=runs.length>=2&&runs[0].intervals[0]?.Position_MWh!==undefined&&runs[0].intervals[0]?.Is_Day_End!==undefined;
+    el('pfEmpty').textContent=isBattery(result)?'The book nets Prop proxy runs. Switch the setup to Prop proxy to build one.'
+      :'Run at least two strategies (press two cards in the library) to build a portfolio.';
     el('pfEmpty').hidden=ready; el('pfBody').hidden=!ready;
+    maybeFillBook();
     if(!ready){bookKey='';return;}
     // Rebuild weight inputs only when the runs or weighting mode change, so typing is not interrupted by the replay.
     const mode=el('pfWeighting').value, key=runs.map(run=>run.runId).join(',')+'|'+mode;
@@ -578,7 +617,14 @@
       portfolio.rowsKey=key; const body=el('pfWeightRows'); body.replaceChildren();
       runs.forEach((run,i)=>{
         const tr=document.createElement('tr');tr.dataset.run=run.runId;
-        const name=document.createElement('td');name.textContent=`#${run.runId} ${run.name}`;name.style.color=runColors[i];
+        const name=document.createElement('td'),picker=document.createElement('select');
+        picker.setAttribute('aria-label',`Strategy in book slot ${i+1}`);picker.style.color=runColors[i];
+        const current=presets.findIndex(p=>p.name===run.name);
+        if(current<0){const custom=document.createElement('option');custom.value='';custom.textContent=`#${run.runId} ${run.name}`;picker.append(custom);}
+        presets.forEach((p,j)=>{const option=document.createElement('option');option.value=String(j);option.textContent=p.name;option.disabled=Boolean(p.sizing)&&isBattery(run);picker.append(option);});
+        picker.value=current<0?'':String(current);
+        picker.addEventListener('change',()=>replaceSlot(i,presets[Number(picker.value)],picker));
+        name.append(picker);
         const includeCell=document.createElement('td'),include=document.createElement('input');include.type='checkbox';include.checked=portfolio.include.get(run.runId)!==false;include.setAttribute('aria-label',`Include run ${run.runId} in the book`);
         include.addEventListener('change',()=>{portfolio.include.set(run.runId,include.checked);renderPortfolio();});includeCell.append(include);
         const weightCell=document.createElement('td'),weight=document.createElement('input');weight.type='number';weight.min='0';weight.max='10';weight.step='0.1';weight.readOnly=mode!=='manual';weight.setAttribute('aria-label',`Weight for run ${run.runId}`);
@@ -635,6 +681,51 @@
     el('pfNotes').textContent=`Weights scale each run’s MWh. Inverse-volatility weights, σ, correlation and the diversification ratio use the whole test (in-sample) on ${combined.length} hourly observations, so treat them as illustrative.${costs.size>1?' Runs use different transaction costs; the book uses the first included run’s rate.':''} Negative correlation (green) diversifies; positive (blue) concentrates.`;
     drawPortfolio(book,from,to);
   }
+  // ---- Book slots: five starter strategies when the book comes into view, each replaceable from its row ----
+  const starterBook=['Cheapest 20% / priciest 20%','Forecast momentum','Night long, evening short','Daily z-score reversion','Power vs gas'];
+  let bookVisible=false,filling=false;
+  new IntersectionObserver(entries=>{bookVisible=entries.some(entry=>entry.isIntersecting);if(bookVisible)maybeFillBook();},{rootMargin:'300px 0px'}).observe(el('portfolio'));
+  function presetPayload(p) {
+    const payload={...request(),name:p.name,signal:p.signal||'formula',formula:p.formula||'signal = -wind',lookback:p.lookback||4,
+      direction:p.direction,lower:p.lower,upper:p.upper,forecast_col:p.forecast||'Prediction',sizing:p.sizing||'fixed',fundamental_records:null,signal_records:null};
+    delete payload.outer_lower;delete payload.outer_upper;delete payload.max_multiplier;
+    if(p.sizing)Object.assign(payload,{outer_lower:p.outerLower,outer_upper:p.outerUpper,max_multiplier:p.maxSize});
+    return payload;
+  }
+  async function runPreset(p) {
+    const payload=presetPayload(p);
+    const response=await fetch('/api/custom-strategy',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload),signal:AbortSignal.timeout(60000)});
+    const data=await response.json();
+    if(!response.ok)throw new Error(typeof data.detail==='string'?data.detail:`Backtest failed (${response.status}).`);
+    data.request=payload;return data;
+  }
+  async function maybeFillBook() {
+    if(filling||!bookVisible||!result||busy||isBattery(result)||runs.length>=5)return;
+    const missing=starterBook.filter(name=>!runs.some(run=>run.name===name)).slice(0,5-runs.length);
+    if(!missing.length)return;
+    filling=true;const fillStatus=el('pfFillStatus');fillStatus.hidden=false;
+    try{
+      for(const [i,name] of missing.entries()){
+        fillStatus.textContent=`Loading starter strategies for the book… ${i+1} / ${missing.length}`;
+        const data=await runPreset(presets.find(p=>p.name===name));
+        if(isBattery(result))break;
+        insertRun(data,{makeCurrent:false});
+        if(result)render();
+      }
+      fillStatus.hidden=true;
+    }catch(error){fillStatus.textContent=`Starter strategies could not load: ${error.message}`;}
+    finally{filling=false;}
+  }
+  async function replaceSlot(slot,p,picker) {
+    if(!p)return;
+    picker.disabled=true;const fillStatus=el('pfFillStatus');fillStatus.hidden=false;fillStatus.textContent=`Running ${p.name} for slot ${slot+1}…`;
+    try{
+      const data=await runPreset(p);
+      if(!insertRun(data,{makeCurrent:false,slot})){fillStatus.textContent=`${p.name} is already in the book.`;portfolio.rowsKey='';render();return;}
+      fillStatus.hidden=true;portfolio.rowsKey='';render();
+    }catch(error){fillStatus.textContent=`Could not run ${p.name}: ${error.message}`;portfolio.rowsKey='';render();}
+  }
+
   // ---- Book robustness: recomputed on the server whenever the book's runs, weights, cap or loss limit change ----
   let bookTimer=null,bookSerial=0,bookKey='',bookState=null;
   const pValueText=p=>p<0.001?'< 0.001':p.toFixed(3), pValueClass=p=>p<0.05?'p-strong':p<0.10?'p-weak':'p-none';
@@ -806,6 +897,10 @@
     pauseReplay();el('strategyEditor').open=true;el('strategyEditor').scrollIntoView({behavior:'auto',block:'start'});el('labSizing').focus({preventScroll:true});
   });
   el('chartWindow').addEventListener('change',()=>{if(result)render();});
+  document.querySelectorAll('[data-setup]').forEach(button=>button.addEventListener('click',()=>{
+    if(busy||readingFile||el('labSetup').value===button.dataset.setup)return;
+    el('labSetup').value=button.dataset.setup;updateFields();dirty();initialReplay=true;el('labForm').requestSubmit();
+  }));
   el('pfWeighting').addEventListener('change',()=>{if(result)renderPortfolio();});
   el('signalCanvas').addEventListener('mousemove',event=>{
     const bounds=el('signalCanvas').getBoundingClientRect();drawSignal((event.clientX-bounds.left-65)/(bounds.width-81));

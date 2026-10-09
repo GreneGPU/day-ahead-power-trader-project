@@ -157,7 +157,7 @@
       <div class="signal-lab" id="replayWorkspace">
         <div class="sl-head">
           <h2>Finding signal <span>in complexity.</span></h2>
-          <span class="sl-tag"><i class="live-dot" aria-hidden="true"></i>Real DK1 history &#183; DKK</span>
+          <div class="sl-head-tools"><div class="setup-toggle" role="group" aria-label="Trading setup"><button type="button" data-setup="prop" aria-pressed="true">Prop proxy</button><button type="button" data-setup="battery" aria-pressed="false">Battery</button></div><span class="sl-tag"><i class="live-dot" aria-hidden="true"></i>Real DK1 history &#183; DKK</span></div>
         </div>
 
         <div class="sl-library" aria-labelledby="libraryTitle">
@@ -174,7 +174,7 @@
             <span class="sl-time" id="replayTime">Start of test</span>
           </div>
           <dl>
-            <div><dt>Position</dt><dd id="replayPosition">Flat</dd><dd class="sub" id="replayExposure"></dd></div>
+            <div><dt id="replayPositionLabel">Position</dt><dd id="replayPosition">Flat</dd><dd class="sub" id="replayExposure"></dd></div>
             <div><dt>Net P&amp;L &#183; DKK</dt><dd id="replayNetCashflow">0</dd><dd class="sub">after costs</dd></div>
           </dl>
         </div>
@@ -215,7 +215,7 @@
         <div class="sl-stats">
           <div><small>Signal</small><strong id="replaySignal">&#8212;</strong></div>
           <div><small>Directional strength</small><strong id="replayStrength">&#8212;</strong></div>
-          <div><small>After settlement</small><strong id="replayAfter">Flat</strong></div>
+          <div><small id="replayAfterLabel">After settlement</small><strong id="replayAfter">Flat</strong></div>
           <div class="sl-equity"><small>Equity curve &#183; cumulative P&amp;L, DKK</small><canvas id="labChart" role="img" aria-label="Cumulative net cashflow for each strategy run through the replay time"></canvas></div>
         </div>
 
@@ -239,9 +239,10 @@
               <label class="sl-speed" for="pfLoss">Daily loss limit &#183; DKK <input id="pfLoss" type="number" min="0" step="any" value="0"></label>
             </div>
           </div>
+          <p class="pf-fill" id="pfFillStatus" role="status" aria-live="polite" hidden></p>
           <p class="pf-empty" id="pfEmpty">Run at least two strategies (press two cards in the library) to build a portfolio.</p>
           <div id="pfBody" hidden>
-            <div class="table-wrap"><table id="pfWeights"><thead><tr><th>Run</th><th>In book</th><th>Weight &#215;</th><th>Hourly P&amp;L &#963; &#183; DKK</th><th>Stand-alone P&amp;L &#183; window</th></tr></thead><tbody id="pfWeightRows"></tbody></table></div>
+            <div class="table-wrap"><table id="pfWeights"><thead><tr><th>Strategy &#183; pick to replace</th><th>In book</th><th>Weight &#215;</th><th>Hourly P&amp;L &#963; &#183; DKK</th><th>Stand-alone P&amp;L &#183; window</th></tr></thead><tbody id="pfWeightRows"></tbody></table></div>
             <div class="pf-stats">
               <div><small>Portfolio P&amp;L &#183; window</small><strong id="pfPnl">&#8212;</strong><span id="pfPnlNote"></span></div>
               <div><small>Sum of stand-alone runs</small><strong id="pfStandalone">&#8212;</strong><span>same weights, traded separately</span></div>
@@ -352,7 +353,7 @@
             <p>Repeated tuning on these dates is exploratory, not independent validation.</p>
           </section>
           <section class="card"><h3><span>03</span> Model execution</h3>
-            <label for="labSetup">Trading setup</label><select id="labSetup"><option value="prop">Prop proxy &#183; long / short</option></select>
+            <label for="labSetup">Trading setup</label><select id="labSetup"><option value="prop">Prop proxy &#183; long / short</option><option value="battery">Battery &#183; charge / discharge</option></select>
             <div id="labBatteryFields"><div class="pair"><div><label for="labCapacity">Capacity &#183; MWh</label><input id="labCapacity" type="number" value="100" min="0.01" max="100000" step="any" required></div><div><label for="labPower">Power &#183; MW</label><input id="labPower" type="number" value="25" min="0.01" max="100000" step="any" required></div></div>
             <label for="labEfficiency">Round-trip efficiency &#183; %</label><input id="labEfficiency" type="number" value="90" min="0.01" max="100" step="any" required>
             <div class="pair"><div><label for="labChargeFee">Buy fee &#183; DKK/MWh</label><input id="labChargeFee" type="number" value="115.41" min="0" max="100000" step="any" required></div><div><label for="labSellFee">Sell fee &#183; DKK/MWh</label><input id="labSellFee" type="number" value="10.71" min="0" max="100000" step="any" required></div></div><p>Starts empty. Remaining energy is excluded from cashflow.</p></div>

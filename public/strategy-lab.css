@@ -317,3 +317,13 @@ input[type=file]{padding:8px;font-size:12px}
 .pf-robust td:first-child{white-space:normal}
 .pf-robust .p-strong{color:var(--p-long)}.pf-robust .p-weak{color:var(--p-signal)}.pf-robust .p-none{color:var(--p-short)}
 .pf-robust-verdict{color:var(--p-text)!important}
+
+/* Trading setup toggle and book slots */
+.sl-head-tools{display:flex;flex-wrap:wrap;align-items:center;gap:10px 18px}
+.setup-toggle{display:inline-flex;padding:3px;border:1px solid var(--p-line);border-radius:6px;background:#0b1431}
+.setup-toggle button{min-height:32px;padding:5px 14px;border:0;border-radius:4px;background:transparent;color:var(--p-muted);font:500 13px var(--font);cursor:pointer}
+.setup-toggle button[aria-pressed=true]{background:var(--accent);color:#fff}
+.setup-toggle button:disabled{opacity:.6;cursor:wait}
+#pfWeights select{max-width:260px;min-height:32px;padding:4px 8px;border-radius:4px;border:1px solid var(--p-line);background:var(--p-bg);color:var(--p-text);font:13px var(--font)}
+.pf-fill{margin:0 0 10px;color:var(--p-signal);font-size:13px}
+.strategy-card:disabled{opacity:.4}
