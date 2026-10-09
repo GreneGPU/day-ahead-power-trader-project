@@ -186,21 +186,30 @@ def simulate_prop_positions_with_eod_imbalance(
     position_change_events = 0
     rows: list[dict[str, float | int | str | bool]] = []
 
-    for index, requested_position in enumerate(requested_positions):
-        date_key = local_dates.iloc[index]
+    # Plain NumPy arrays inside the loop: pandas .iloc per row dominated optimizer runtime.
+    requested_arr = requested_positions.to_numpy()
+    dates_arr = local_dates.to_numpy()
+    day_end_arr = is_day_end.to_numpy(dtype=bool)
+    spread_arr = imbalance_spread.to_numpy(dtype=float)
+    move_arr = next_price_change.to_numpy(dtype=float)
+    multiplier_arr = multipliers.to_numpy(dtype=float)
+    price_arr = actual_price.to_numpy(dtype=float)
+
+    for index, requested_position in enumerate(requested_arr):
+        date_key = dates_arr[index]
         daily_cashflow.setdefault(date_key, 0.0)
         risk_off = (
             cfg.max_daily_loss_dkk is not None
             and daily_cashflow[date_key] <= -abs(cfg.max_daily_loss_dkk)
         )
         position = 0 if risk_off else int(requested_position)
-        settles_at_imbalance = bool(is_day_end.iloc[index] and position != 0)
+        settles_at_imbalance = bool(day_end_arr[index] and position != 0)
         price_move = (
-            float(imbalance_spread.iloc[index])
+            float(spread_arr[index])
             if settles_at_imbalance
-            else float(next_price_change.iloc[index])
+            else float(move_arr[index])
         )
-        exposure_mwh = position * cfg.position_size_mwh * float(multipliers.iloc[index])
+        exposure_mwh = position * cfg.position_size_mwh * float(multiplier_arr[index])
         opening_turnover_mwh = abs(exposure_mwh - previous_exposure_mwh)
         closing_turnover_mwh = abs(exposure_mwh) if settles_at_imbalance else 0.0
         position_change_events += int(exposure_mwh != previous_exposure_mwh) + int(settles_at_imbalance)
@@ -210,7 +219,7 @@ def simulate_prop_positions_with_eod_imbalance(
         gross_cashflow = exposure_mwh * price_move
         cashflow = gross_cashflow - transaction_cost
         daily_cashflow[date_key] += cashflow
-        position_after_settlement = 0 if bool(is_day_end.iloc[index]) else position
+        position_after_settlement = 0 if bool(day_end_arr[index]) else position
         action = (
             "risk-off"
             if risk_off
@@ -231,23 +240,23 @@ def simulate_prop_positions_with_eod_imbalance(
                 "Requested_Position": int(requested_position),
                 "Position": position,
                 "Position_MWh": exposure_mwh,
-                "Size_Multiplier": float(multipliers.iloc[index]) if position else 0.0,
+                "Size_Multiplier": float(multiplier_arr[index]) if position else 0.0,
                 "Position_After_Settlement": position_after_settlement,
-                "Day_Ahead_Price_DKK": float(actual_price.iloc[index]),
-                "Imbalance_Spread_DKK": float(imbalance_spread.iloc[index]),
+                "Day_Ahead_Price_DKK": float(price_arr[index]),
+                "Imbalance_Spread_DKK": float(spread_arr[index]),
                 "Price_Change_DKK": price_move,
                 "Gross_Cashflow": gross_cashflow,
                 "Transaction_Cost": transaction_cost,
                 "Cashflow": cashflow,
                 "Daily_Cashflow": daily_cashflow[date_key],
-                "Is_Day_End": bool(is_day_end.iloc[index]),
+                "Is_Day_End": bool(day_end_arr[index]),
                 "EOD_Imbalance_Settlement": settles_at_imbalance,
                 "Settlement_Basis": "imbalance" if settles_at_imbalance else "day-ahead proxy",
                 "Action": action,
             }
         )
         previous_position = position_after_settlement
-        previous_exposure_mwh = 0.0 if bool(is_day_end.iloc[index]) else exposure_mwh
+        previous_exposure_mwh = 0.0 if bool(day_end_arr[index]) else exposure_mwh
 
     accounting = pd.DataFrame(rows, index=out.index)
     for column in accounting.columns:

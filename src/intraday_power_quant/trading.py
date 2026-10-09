@@ -298,21 +298,33 @@ def _simulate_battery_dispatch(
         raise ValueError("Battery degradation cost must be non-negative.")
     step_hours = _infer_step_hours(sim[time_col])
     soc = min(max(cfg.initial_soc_mwh, 0.0), cfg.capacity_mwh)
-    rows: list[dict[str, float | str | pd.Timestamp]] = []
     daily_cashflow: dict[object, float] = {}
+    # Array loop: building a dict of every column per row dominated optimizer runtime.
+    dates = [timestamp.date() for timestamp in sim[time_col]]
+    prices = sim[actual_col].astype(float).to_numpy()
+    requested_actions = sim[action_col].astype(str).to_numpy()
+    requested_powers = (
+        sim["Requested_Power_MW"].to_numpy(dtype=object)
+        if "Requested_Power_MW" in sim.columns
+        else np.full(len(sim), cfg.power_mw, dtype=object)
+    )
+    n = len(sim)
+    actions = np.empty(n, dtype=object)
+    dispatch = np.zeros(n)
+    soc_path = np.zeros(n)
+    cashflows = np.zeros(n)
+    daily_path = np.zeros(n)
 
-    for row in sim.itertuples(index=False):
-        row_dict = row._asdict()
-        timestamp = row_dict[time_col]
-        actual_price = float(row_dict[actual_col])
-        requested_action = str(row_dict[action_col])
-        requested_power = row_dict.get("Requested_Power_MW", cfg.power_mw)
+    for index in range(n):
+        actual_price = float(prices[index])
+        requested_action = str(requested_actions[index])
+        requested_power = requested_powers[index]
         requested_power = (
             cfg.power_mw
             if requested_power is None or pd.isna(requested_power)
             else min(abs(float(requested_power)), cfg.power_mw)
         )
-        date_key = timestamp.date()
+        date_key = dates[index]
         daily_cashflow.setdefault(date_key, 0.0)
 
         action = "hold"
@@ -347,19 +359,18 @@ def _simulate_battery_dispatch(
 
         soc = min(max(soc, 0.0), cfg.capacity_mwh)
         daily_cashflow[date_key] += cashflow
-        rows.append(
-            {
-                **row_dict,
-                "Signal_Action": requested_action,
-                "Action": action,
-                "Dispatch_MW": dispatch_mw,
-                "State_Of_Charge_MWh": soc,
-                "Cashflow": cashflow,
-                "Daily_Cashflow": daily_cashflow[date_key],
-            }
-        )
+        actions[index], dispatch[index], soc_path[index] = action, dispatch_mw, soc
+        cashflows[index], daily_path[index] = cashflow, daily_cashflow[date_key]
 
-    out = pd.DataFrame(rows).drop(columns=[action_col])
+    # Same columns as before: the input's columns in order, then (or overwriting in place) the results.
+    out = sim.reset_index(drop=True).copy()
+    out["Signal_Action"] = requested_actions
+    out["Action"] = actions.astype(str) if n else actions
+    out["Dispatch_MW"] = dispatch
+    out["State_Of_Charge_MWh"] = soc_path
+    out["Cashflow"] = cashflows
+    out["Daily_Cashflow"] = daily_path
+    out = out.drop(columns=[action_col])
     out["Cumulative_Cashflow"] = out["Cashflow"].cumsum()
     total_energy_charged = float((-out.loc[out["Dispatch_MW"] < 0, "Dispatch_MW"] * step_hours).sum())
     total_energy_discharged = float((out.loc[out["Dispatch_MW"] > 0, "Dispatch_MW"] * step_hours).sum())

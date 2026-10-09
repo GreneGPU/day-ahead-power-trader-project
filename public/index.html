@@ -327,7 +327,7 @@
               <p><code>HourUTC,outages</code>; optionally add <code>demand,wind,solar</code> to replace the saved forecasts. Use forecasts or outage information known before each decision.</p>
               <button type="button" class="btn btn-outline" id="labFundamentalTemplate">Download fundamentals template</button><p id="labFundamentalStatus" role="status">Using saved wind, solar, demand and lagged model features. Only outages need an upload.</p></details>
             </div>
-            <div id="labForecastFields"><label for="labForecast">Forecast model</label><select id="labForecast"><option value="Prediction">Transfer residual ensemble</option><option value="Direct_15min_Prediction">Direct 15-minute ensemble</option><option value="Hourly_Baseline">Hourly baseline</option></select></div>
+            <div id="labForecastFields"><label for="labForecast">Forecast model</label><select id="labForecast"><option value="Prediction">Walk-forward champion (gated)</option><option value="Direct_15min_Prediction">Direct 15-minute ensemble</option><option value="Transfer_Residual_Prediction">Transfer residual ensemble (ungated)</option><option value="Hourly_Baseline">Hourly baseline</option></select></div>
             <div id="labLookbackFields" hidden><label for="labLookback">Lookback &#183; 15-minute intervals</label><input id="labLookback" type="number" value="4" min="1" max="672" step="1" required></div>
             <div id="labCsvFields" hidden><label for="labCsv">Signal CSV</label><input id="labCsv" type="file" accept=".csv,text/csv"><p>Columns: <code>HourUTC,Signal</code>. Use timestamps with a timezone, e.g. Z for UTC. Include every interval in your test period.</p><button type="button" class="btn btn-outline" id="labTemplate">Download CSV template</button><p id="labCsvStatus" role="status">No file loaded.</p></div>
             <p id="labSignalHelp">Forecast minus the hourly baseline, in DKK/MWh. Negative values mean the forecast is lower.</p>
@@ -395,7 +395,7 @@
   const fmt = (value, digits) => value == null || !Number.isFinite(Number(value)) ? '—' : Number(value).toLocaleString('en-DK', {maximumFractionDigits: digits});
   fetch('/api/results?days=1').then(response => response.ok ? response.json() : Promise.reject()).then(data => {
     document.getElementById('statIntervals').textContent = fmt(data.dataset.rows, 0);
-    const metric = data.model_metrics.find(row => row.Model === 'Transfer residual ensemble');
+    const metric = data.model_metrics.find(row => row.Model === 'Walk-forward champion');
     if (metric) {document.getElementById('statMae').textContent = fmt(metric.MAE, 2); document.getElementById('statMaeLabel').textContent = `MAE · EUR/MWh · ${metric.Model}`;}
     const span = (Date.parse(data.dataset.end) - Date.parse(data.dataset.start)) / 86400000;
     if (Number.isFinite(span)) document.getElementById('statDays').textContent = fmt(Math.round(span), 0);

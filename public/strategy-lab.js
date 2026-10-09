@@ -26,7 +26,7 @@
     {tag:'Fundamentals',name:'Residual demand',desc:'Long when demand minus wind and solar is tight, short when it is loose.',formula:'signal = demand - wind - solar',direction:'buy_high',lower:600,upper:2300},
     {tag:'Fundamentals',name:'Wind fade',desc:'Long on calm intervals (wind < 700 MW), short when wind > 2,300 MW.',formula:'signal = -wind',direction:'buy_high',lower:-2300,upper:-700},
     {tag:'Fundamentals',name:'Power vs gas',desc:'Long when power is cheap relative to yesterday’s gas price, short when rich.',formula:'signal = forecast / gas_price_lag_96',direction:'buy_low',lower:18,upper:29},
-    {tag:'Forecast',name:'Below the hourly baseline',desc:'Long when the 15-min forecast sits under the hourly baseline, short when well above.',formula:'signal = forecast - baseline',direction:'buy_low',lower:5,upper:70},
+    {tag:'Forecast',name:'Below the hourly baseline',desc:'Long when the transfer model’s 15-min forecast sits under the hourly baseline, short when well above.',forecast:'Transfer_Residual_Prediction',formula:'signal = forecast - baseline',direction:'buy_low',lower:5,upper:70},
     {tag:'Forecast',name:'Forecast momentum',desc:'Follow the forecast’s 1-hour move: long if up > 65 DKK, short if down > 65.',signal:'forecast_change',lookback:4,direction:'buy_high',lower:-65,upper:65},
   ];
   function presetRule(p) {
@@ -54,6 +54,7 @@
     return el('labSignal').value===signal && (signal!=='formula'||el('labFormula').value.trim()===p.formula)
       && (signal!=='forecast_change'||number('labLookback')===p.lookback)
       && el('labDirection').value===p.direction && number('labLower')===p.lower && number('labUpper')===p.upper
+      && el('labForecast').value===(p.forecast||'Prediction')
       && el('labSizing').value===(p.sizing||'fixed')
       && (!p.sizing||(number('labOuterLower')===p.outerLower&&number('labOuterUpper')===p.outerUpper&&number('labMaxSize')===p.maxSize));
   }
@@ -64,6 +65,7 @@
     if(p.lookback)el('labLookback').value=p.lookback;
     el('labName').value=p.name; el('labDirection').value=p.direction; el('labLower').value=p.lower; el('labUpper').value=p.upper;
     el('labSizing').value=p.sizing||'fixed';
+    el('labForecast').value=p.forecast||'Prediction';
     if(p.sizing){el('labOuterLower').value=p.outerLower;el('labOuterUpper').value=p.outerUpper;el('labMaxSize').value=p.maxSize;}
     updateFields(); dirty(); initialReplay=true; el('labForm').requestSubmit();
   }

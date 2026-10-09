@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 from intraday_power_quant.walk_forward import walk_forward_blocks
 
@@ -26,3 +27,28 @@ def test_deployment_predictions_match_the_walk_forward_manifest():
     assert predictions['HourUTC'].is_monotonic_increasing and not predictions['HourUTC'].duplicated().any()
     # Every prediction lies after the first training block, i.e. no interval was in its own model's training data.
     assert predictions['HourUTC'].min() >= pd.Timestamp('2025-11-13', tz='UTC')
+
+
+def test_cv_gate_compares_out_of_fold_error_with_the_baseline_on_the_same_rows():
+    import numpy as np
+    from intraday_power_quant.walk_forward import cv_gate
+
+    target = np.array([10.0, -10.0, 5.0, -5.0])
+    good = cv_gate(np.array([np.nan, -8.0, 4.0, -4.0]), target, np.zeros(4))   # first row has no OOF value
+    assert good["passes"] and good["baseline_cv_mae"] == pytest.approx((10 + 5 + 5) / 3)
+    bad = cv_gate(np.array([np.nan, 8.0, -4.0, 4.0]), target, np.zeros(4))
+    assert not bad["passes"]
+
+
+def test_champion_uses_only_earlier_blocks_and_respects_the_gate():
+    from intraday_power_quant.walk_forward import choose_champion
+
+    earlier = pd.DataFrame({"Actual_Price": [100.0, 110.0], "Hourly_Baseline": [90.0, 100.0],
+                            "TL_Residual_Average": [99.0, 109.0], "TL_Residual_Stacked": [80.0, 90.0],
+                            "Direct_15min_Stacked": [70.0, 70.0]})
+    both_pass = {"residual": True, "direct": True}
+    assert choose_champion(None, "TL_Residual_Average", both_pass)[0] == "TL_Residual_Average"
+    assert choose_champion(earlier, "TL_Residual_Average", both_pass)[0] == "TL_Residual_Average"
+    # The best earlier model is residual-based, but its gate failed on this block's training data.
+    champion, reason = choose_champion(earlier, "TL_Residual_Average", {"residual": False, "direct": True})
+    assert champion == "Hourly_Baseline" and "gate" in reason

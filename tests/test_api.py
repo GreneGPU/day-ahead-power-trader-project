@@ -59,7 +59,8 @@ def test_deployment_results_use_real_predictions() -> None:
     payload = response.json()
     assert payload["dataset"]["rows"] == 10744  # walk-forward out-of-sample history
     assert len(payload["prices"]) == 10744
-    assert len(payload["model_metrics"]) == 9
+    assert len(payload["model_metrics"]) == 11  # 5 walk-forward rows + 6 thesis benchmarks
+    assert payload["model_metrics"][0]["Model"] == "Walk-forward champion"
     sarimax_tl = next(
         row
         for row in payload["model_metrics"]
@@ -269,25 +270,27 @@ def test_saved_comparisons_are_available_without_recalculation() -> None:
         assert payload["saved_result"] is True
         assert payload["trading_setup"] == setup
         assert payload["evaluation"]["test_days"] == 10
-        assert payload["evaluation"]["daily_observations"] == 10
+        assert payload["evaluation"]["daily_observations"] == 20  # 2 walk-forward blocks of 10 days
         assert len(payload["strategies"]) == expected_count
-        assert payload["request"]["days"] == 30  # matches the dashboard's default history window
+        assert payload["request"]["days"] == 40  # matches the dashboard's default history window
         if setup == "battery":
-            assert math.isclose(payload["strategies"][0]["Cashflow"], 2199.148037903912)
+            assert math.isclose(payload["strategies"][0]["Cashflow"], 4281.855638, rel_tol=1e-9)
+        assert all(len(row["Walk_Forward_Blocks"]) == 2 for row in payload["strategies"])
         assert set(payload["strategy_series"]) == {
             row["Strategy"] for row in payload["strategies"]
         }
 
 
-def test_strategy_optimization_uses_earlier_train_and_later_unseen_test_data() -> None:
+def test_strategy_optimization_is_walk_forward_and_never_tunes_on_its_test_block() -> None:
     response = client.post(
         "/api/compare",
         json={
             "forecast_col": "Prediction",
             "strategy": "Momentum",
-            "days": 7,
+            "days": 40,
             "optimize": True,
-            "test_days": 6,
+            "test_days": 10,
+            "tune_days": 20,
             "battery": {
                 "capacity_mwh": 100,
                 "power_mw": 25,
@@ -303,19 +306,26 @@ def test_strategy_optimization_uses_earlier_train_and_later_unseen_test_data() -
     payload = response.json()
     evaluation = payload["evaluation"]
     assert evaluation["mode"] == "out_of_sample_optimization"
-    assert evaluation["train_rows"] + evaluation["test_rows"] == payload["dataset"]["history_rows"]
-    assert evaluation["train_end"] < evaluation["test_start"]
-    assert evaluation["test_days"] == 6
-    assert evaluation["daily_observations"] == 6
-    assert evaluation["test_rows"] == 6 * 96
+    assert evaluation["tuning"] == "walk_forward_neighbour_smoothed"
+    assert evaluation["test_days"] == 10 and evaluation["daily_observations"] == 20
+    assert evaluation["test_rows"] == 20 * 96
     assert len(payload["selected_strategy_series"]) == evaluation["test_rows"]
     momentum = next(row for row in payload["strategies"] if row["Strategy"] == "Momentum")
-    assert momentum["Evaluations"] > 1
-    assert momentum["Train_Cashflow"] is not None
-    assert momentum["Test_Potential_Cashflow"] is not None
-    assert momentum["Test_Potential_Cashflow"] >= momentum["Cashflow"]
-    assert momentum["Test_Potential_Settings"]
-    assert momentum["No_Fee_Potential_Cashflow"] is not None
-    assert momentum["No_Fee_Potential_Cashflow"] >= momentum["Test_Potential_Cashflow"]
-    assert momentum["No_Fee_Potential_Settings"]
-    assert "lookback_hours" in momentum["Settings"]
+    blocks = momentum["Walk_Forward_Blocks"]
+    assert len(blocks) == 2 and momentum["Evaluations"] > 1
+    for block in blocks:
+        assert block["Tune_End"] < block["Test_Start"]  # tuning days end before the block they choose for
+    assert blocks[0]["Test_End"] < blocks[1]["Test_Start"]
+    # The stitched out-of-sample series is exactly the per-block results.
+    assert math.isclose(momentum["Cashflow"], sum(block["Test_Cashflow"] for block in blocks), abs_tol=1e-6)
+    assert momentum["Train_Days"] == 40 and momentum["Train_Cashflow"] is not None
+    assert momentum["Test_Potential_Settings"] and momentum["No_Fee_Potential_Settings"]
+    assert "block 1:" in momentum["Settings"] and "lookback_hours" in momentum["Settings"]
+
+
+def test_prop_requests_do_not_change_cached_battery_prices() -> None:
+    from api.index import _load_deployment_results
+
+    before = float(_load_deployment_results()[0]["Actual_Price"].iloc[0])
+    assert client.post("/api/compare", json={"trading_setup": "prop", "days": 3}).status_code == 200
+    assert float(_load_deployment_results()[0]["Actual_Price"].iloc[0]) == before

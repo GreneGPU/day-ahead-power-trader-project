@@ -110,11 +110,14 @@ def _add_result(
         [pd.DataFrame, dict[str, float]], tuple[pd.DataFrame, dict[str, float]]
     ]
     | None = None,
+    capture: Callable[[str, dict[str, object], pd.DataFrame], None] | None = None,
 ) -> None:
     sim, summary = simulator()
     if result_transform is not None:
         sim, summary = result_transform(sim, summary)
     rows.append(_summary_row(strategy, settings, sim, summary))
+    if capture is not None:
+        capture(strategy, settings, sim)
 
 
 def best_parameter_rows(sweep: pd.DataFrame, ranking_metric: str = "Cashflow") -> pd.DataFrame:
@@ -301,8 +304,14 @@ def run_strategy_parameter_sweep(
         [pd.DataFrame, dict[str, float]], tuple[pd.DataFrame, dict[str, float]]
     ]
     | None = None,
+    strategies: set[str] | None = None,
+    capture: Callable[[str, dict[str, object], pd.DataFrame], None] | None = None,
 ) -> pd.DataFrame:
-    """Evaluate a compact grid of strategy parameters and return every successful run."""
+    """Evaluate a compact grid of strategy parameters and return every successful run.
+
+    ``strategies`` limits the sweep; other strategies are skipped before they are simulated.
+    ``capture`` receives each setting's simulation, e.g. to keep its daily P&L for walk-forward tuning.
+    """
     battery = battery_config or BatteryConfig()
     rows: list[dict[str, object]] = []
 
@@ -311,7 +320,9 @@ def run_strategy_parameter_sweep(
         settings: dict[str, object],
         simulator: Callable[[], tuple[pd.DataFrame, dict[str, float]]],
     ) -> None:
-        _add_result(rows, strategy, settings, simulator, result_transform)
+        if strategies is not None and strategy not in strategies:
+            return
+        _add_result(rows, strategy, settings, simulator, result_transform, capture)
 
     for low_quantile, high_quantile in QUANTILE_PAIRS:
         settings = {"low_quantile": low_quantile, "high_quantile": high_quantile}
@@ -523,6 +534,7 @@ def optimize_strategy_suite(
         [pd.DataFrame, dict[str, float]], tuple[pd.DataFrame, dict[str, float]]
     ]
     | None = None,
+    strategies: set[str] | None = None,
 ) -> pd.DataFrame:
     """Return the best cashflow setting for each strategy in the sweep."""
     return best_parameter_rows(
@@ -533,6 +545,7 @@ def optimize_strategy_suite(
             actual_col=actual_col,
             forecast_col=forecast_col,
             result_transform=result_transform,
+            strategies=strategies,
         ),
         ranking_metric=ranking_metric,
     )

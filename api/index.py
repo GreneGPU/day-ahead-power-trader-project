@@ -20,7 +20,11 @@ SRC_ROOT = PROJECT_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from intraday_power_quant.optimization import optimize_strategy_suite, simulate_strategy_from_settings
+from intraday_power_quant.optimization import (
+    optimize_strategy_suite,
+    run_strategy_parameter_sweep,
+    simulate_strategy_from_settings,
+)
 from intraday_power_quant.custom_strategy import (
     CustomStrategyRequest,
     prepare_custom_signals,
@@ -29,6 +33,13 @@ from intraday_power_quant.custom_strategy import (
 )
 from intraday_power_quant.latest_prices import latest_prices
 from intraday_power_quant.significance import significance_tests
+from intraday_power_quant.tuning import (
+    DailyPnlCapture,
+    best_fixed_setting,
+    local_dates,
+    tune_strategy,
+    walk_forward_folds,
+)
 from intraday_power_quant.imbalance_trading import (
     simulate_imbalance_perfect_foresight,
     simulate_imbalance_spread_positions,
@@ -94,9 +105,10 @@ DEFAULT_SETTINGS: dict[str, dict[str, Any]] = {
 }
 
 FORECAST_COLUMNS = {
-    "Prediction": "Transfer residual ensemble",
+    "Prediction": "Walk-forward champion",
     "Hourly_Baseline": "Hourly baseline only",
     "Direct_15min_Prediction": "Direct 15-min ensemble",
+    "Transfer_Residual_Prediction": "TL residual simple average",
 }
 
 PROP_STRATEGIES = {
@@ -140,6 +152,7 @@ class StrategyComparisonRequest(BaseModel):
     days: int | None = Field(default=None, ge=1, le=90)
     optimize: bool = False
     test_days: int = Field(default=10, ge=2, le=30)
+    tune_days: int = Field(default=20, ge=5, le=60)
     battery: dict[str, Any] = Field(default_factory=dict)
     trading_setup: str = "battery"
     prop: dict[str, Any] = Field(default_factory=dict)
@@ -196,6 +209,19 @@ def _select_window(frame: pd.DataFrame, days: int | None) -> pd.DataFrame:
 EVALUATION_DAYS = {"last_10_days": 10, "last_30_days": 30}
 
 
+def _complete_dates(history: pd.DataFrame, market_timezone: str = "Europe/Copenhagen") -> list[object]:
+    """Copenhagen delivery dates with every quarter-hour present (92/100 on daylight-saving days)."""
+    local_timestamps = pd.to_datetime(history["HourUTC"], utc=True).dt.tz_convert(market_timezone)
+    complete: list[object] = []
+    for local_date in sorted(local_timestamps.dt.date.unique()):
+        day_start = pd.Timestamp(local_date).tz_localize(market_timezone)
+        expected = pd.date_range(day_start, day_start + pd.DateOffset(days=1), freq="15min", inclusive="left")
+        actual = pd.DatetimeIndex(local_timestamps.loc[local_timestamps.dt.date == local_date]).sort_values()
+        if actual.equals(expected):
+            complete.append(local_date)
+    return complete
+
+
 def _split_complete_day_holdout(
     history: pd.DataFrame,
     test_days: int,
@@ -204,17 +230,7 @@ def _split_complete_day_holdout(
     """Use the final complete DK1 calendar days as a chronological holdout."""
     timestamps = pd.to_datetime(history["HourUTC"], utc=True)
     local_timestamps = timestamps.dt.tz_convert(market_timezone)
-    complete_dates: list[object] = []
-
-    for local_date in sorted(local_timestamps.dt.date.unique()):
-        day_start = pd.Timestamp(local_date).tz_localize(market_timezone)
-        day_end = day_start + pd.DateOffset(days=1)
-        expected = pd.date_range(day_start, day_end, freq="15min", inclusive="left")
-        actual = pd.DatetimeIndex(
-            local_timestamps.loc[local_timestamps.dt.date == local_date]
-        ).sort_values()
-        if actual.equals(expected):
-            complete_dates.append(local_date)
+    complete_dates = _complete_dates(history, market_timezone)
 
     if len(complete_dates) < test_days:
         raise ValueError(
@@ -308,10 +324,12 @@ def results(days: int | None = None) -> dict[str, Any]:
                     "Prediction",
                     "Hourly_Baseline",
                     "Direct_15min_Prediction",
+                    "Transfer_Residual_Prediction",
                     "Actual_Price_DKK",
                     "Prediction_DKK",
                     "Hourly_Baseline_DKK",
                     "Direct_15min_Prediction_DKK",
+                    "Transfer_Residual_Prediction_DKK",
                     "Imbalance_Price_DKK",
                     "Dominating_Direction",
                 ]
@@ -470,6 +488,49 @@ def get_latest_dk1_prices(response: Response):
     return data
 
 
+def _settings_label(settings_json: str) -> str:
+    settings = json.loads(settings_json)
+    return ", ".join(f"{key}={'off' if value is None else value}" for key, value in settings.items())
+
+
+def _stitched_summary(
+    simulation: pd.DataFrame, is_directional: bool, battery: BatteryConfig, prop: PropConfig, degradation: float
+) -> dict[str, float]:
+    """Summary of walk-forward blocks stitched together (each block traded with its own tuned setting)."""
+    cashflow = simulation["Cashflow"].astype(float)
+    cumulative = cashflow.cumsum()
+    total = float(cashflow.sum())
+    summary: dict[str, float] = {
+        "total_cashflow": total,
+        "max_drawdown": float((cumulative.cummax() - cumulative).max()) if len(simulation) else 0.0,
+    }
+    if is_directional:
+        position = simulation["Position"]
+        summary.update({
+            "trades": int((position != 0).sum()), "charge_intervals": int((position > 0).sum()),
+            "discharge_intervals": int((position < 0).sum()),
+            "total_fee_cost": float(simulation["Transaction_Cost"].sum()), "total_degradation_cost": 0.0,
+            "round_trip_efficiency": 1.0, "final_soc_mwh": float("nan"),
+            "return_pct": total / prop.initial_capital_dkk * 100,
+            "ending_equity_dkk": prop.initial_capital_dkk + total,
+            "position_changes": int(position.ne(position.shift(fill_value=0)).sum()),
+        })
+        return summary
+    dispatch = simulation["Dispatch_MW"].astype(float)
+    charged, discharged = float(-dispatch[dispatch < 0].sum() * 0.25), float(dispatch[dispatch > 0].sum() * 0.25)
+    summary.update({
+        "trades": int((simulation["Action"] != "hold").sum()),
+        "charge_intervals": int((simulation["Action"] == "charge").sum()),
+        "discharge_intervals": int((simulation["Action"] == "discharge").sum()),
+        "total_fee_cost": charged * (battery.fee_per_mwh + battery.charge_fee_per_mwh)
+        + discharged * (battery.fee_per_mwh + battery.discharge_fee_per_mwh),
+        "total_degradation_cost": degradation,
+        "round_trip_efficiency": battery.charge_efficiency * battery.discharge_efficiency,
+        "final_soc_mwh": float(simulation["State_Of_Charge_MWh"].iloc[-1]) if len(simulation) else float("nan"),
+    })
+    return summary
+
+
 @app.post("/api/compare")
 def compare_strategies(payload: StrategyComparisonRequest) -> dict[str, Any]:
     if payload.forecast_col not in FORECAST_COLUMNS:
@@ -489,6 +550,9 @@ def compare_strategies(payload: StrategyComparisonRequest) -> dict[str, Any]:
         )
     forecasts, metrics, manifest = _load_deployment_results()
     if is_directional:
+        # Copy first: the loaded frame is cached, and converting it in place leaked DKK prices into
+        # later battery (EUR) requests on the same server instance.
+        forecasts = forecasts.copy()
         for column in ["Actual_Price", *FORECAST_COLUMNS]:
             forecasts[column] = forecasts[f"{column}_DKK"]
     history = _select_window(forecasts, payload.days)
@@ -564,79 +628,85 @@ def compare_strategies(payload: StrategyComparisonRequest) -> dict[str, Any]:
             else None
         )
         if payload.optimize:
-            train, selected = _split_complete_day_holdout(history, payload.test_days)
-            optimized = optimize_strategy_suite(
-                train,
+            # Walk-forward tuning: one sweep over the window records each setting's daily P&L; every test
+            # fold then trades the setting with the best neighbour-smoothed P&L over the days before it.
+            swept_strategies = PROP_STRATEGIES if is_directional else None
+            folds = walk_forward_folds(_complete_dates(history), payload.tune_days, payload.test_days)
+            test_dates = [day for _, fold_test in folds for day in fold_test]
+            tune_dates = sorted({day for fold_tune, _ in folds for day in fold_tune})
+            history_dates = local_dates(history["HourUTC"])
+            selected = history[history_dates.isin(test_dates)].reset_index(drop=True)
+            train = history[history_dates.isin(tune_dates)].reset_index(drop=True)
+            capture = DailyPnlCapture()
+            run_strategy_parameter_sweep(
+                history,
                 battery_config=battery,
-                ranking_metric="Cashflow",
                 forecast_col=payload.forecast_col,
                 result_transform=result_transform,
+                strategies=swept_strategies,
+                capture=capture,
             )
-            test_potential = optimize_strategy_suite(
-                selected,
-                battery_config=battery,
-                ranking_metric="Cashflow",
-                forecast_col=payload.forecast_col,
-                result_transform=result_transform,
-            )
-            no_fee_potential = optimize_strategy_suite(
-                selected,
-                battery_config=battery if is_directional else no_fee_battery,
-                ranking_metric="Cashflow",
-                forecast_col=payload.forecast_col,
-                result_transform=no_fee_result_transform,
-            )
-            if is_directional:
-                optimized = optimized.loc[optimized["Strategy"].isin(PROP_STRATEGIES)].reset_index(drop=True)
-                test_potential = test_potential.loc[
-                    test_potential["Strategy"].isin(PROP_STRATEGIES)
-                ].reset_index(drop=True)
-                no_fee_potential = no_fee_potential.loc[
-                    no_fee_potential["Strategy"].isin(PROP_STRATEGIES)
-                ].reset_index(drop=True)
-            test_potential_by_strategy = {
-                str(row["Strategy"]): row for row in test_potential.to_dict(orient="records")
-            }
-            no_fee_potential_by_strategy = {
-                str(row["Strategy"]): row
-                for row in no_fee_potential.to_dict(orient="records")
-            }
-            suite: dict[str, tuple[pd.DataFrame, dict[str, float]]] = {}
-            for optimized_row in optimized.to_dict(orient="records"):
-                name = str(optimized_row["Strategy"])
-                settings_json = str(optimized_row["Settings_JSON"])
-                potential_row = test_potential_by_strategy[name]
-                no_fee_potential_row = no_fee_potential_by_strategy[name]
-                strategy_result = simulate_strategy_from_settings(
-                    name,
+            if not is_directional:
+                no_fee_capture = DailyPnlCapture()
+                run_strategy_parameter_sweep(
                     selected,
-                    settings_json,
-                    battery_config=battery,
+                    battery_config=no_fee_battery,
                     forecast_col=payload.forecast_col,
+                    strategies=swept_strategies,
+                    capture=no_fee_capture,
                 )
-                suite[name] = (
-                    result_transform(*strategy_result)
-                    if result_transform is not None
-                    else strategy_result
+                no_fee_best = {name: best_fixed_setting(entries, test_dates) for name, entries in no_fee_capture.daily.items()}
+            else:
+                no_fee_best = {name: best_fixed_setting(entries, test_dates) for name, entries in capture.gross_daily.items()}
+            suite: dict[str, tuple[pd.DataFrame, dict[str, float]]] = {}
+            for name, entries in capture.daily.items():
+                fold_results = tune_strategy(entries, folds)
+                pieces, degradation = [], 0.0
+                for fold in fold_results:
+                    simulation, sim_summary = simulate_strategy_from_settings(
+                        name, history, fold["settings_json"], battery_config=battery, forecast_col=payload.forecast_col,
+                    )
+                    if result_transform is not None:
+                        simulation, sim_summary = result_transform(simulation, sim_summary)
+                    piece = simulation[local_dates(simulation["HourUTC"]).isin(fold["test_dates"])]
+                    if not is_directional and "Dispatch_MW" in piece:
+                        throughput = float(piece["Dispatch_MW"].abs().sum() * 0.25)
+                        degradation += throughput * float(json.loads(fold["settings_json"]).get("degradation_cost_per_mwh", 0.0))
+                    pieces.append(piece)
+                stitched = pd.concat(pieces, ignore_index=True)
+                suite[name] = (stitched, _stitched_summary(stitched, is_directional, battery, prop, degradation))
+                best_json, best_pnl = best_fixed_setting(entries, test_dates)
+                no_fee_json, no_fee_pnl = no_fee_best[name]
+                train_total = sum(fold["train_pnl"] for fold in fold_results)
+                train_days = len(folds) * payload.tune_days
+                train_per_day = train_total / train_days
+                test_per_day = suite[name][1]["total_cashflow"] / len(test_dates)
+                settings_text = "; ".join(
+                    f"block {i + 1}: {_settings_label(fold['settings_json'])}" for i, fold in enumerate(fold_results)
                 )
                 optimization_meta[name] = {
-                    "Settings": str(optimized_row["Settings"]),
-                    "Settings_JSON": settings_json,
-                    "Train_Cashflow": float(optimized_row["Cashflow"]),
-                    "Train_Max_Drawdown": float(optimized_row["Max_Drawdown"]),
-                    "Test_Potential_Cashflow": float(potential_row["Cashflow"]),
-                    "Test_Potential_Max_Drawdown": float(potential_row["Max_Drawdown"]),
-                    "Test_Potential_Settings": str(potential_row["Settings"]),
-                    "Test_Potential_Settings_JSON": str(potential_row["Settings_JSON"]),
-                    "No_Fee_Potential_Cashflow": float(no_fee_potential_row["Cashflow"]),
-                    "No_Fee_Potential_Max_Drawdown": float(
-                        no_fee_potential_row["Max_Drawdown"]
-                    ),
-                    "No_Fee_Potential_Settings": str(no_fee_potential_row["Settings"]),
-                    "No_Fee_Potential_Settings_JSON": str(
-                        no_fee_potential_row["Settings_JSON"]
-                    ),
-                    "Evaluations": int(optimized_row["Evaluations"]),
+                    "Settings": settings_text,
+                    "Settings_JSON": fold_results[-1]["settings_json"],
+                    "Train_Cashflow": float(train_total),
+                    "Train_Max_Drawdown": None,
+                    "Train_Days": train_days,
+                    "OOS_Kept_Pct": float(test_per_day / train_per_day * 100) if train_per_day > 0 else None,
+                    "Walk_Forward_Blocks": [
+                        {"Tune_Start": str(fold["tune_dates"][0]), "Tune_End": str(fold["tune_dates"][-1]),
+                         "Test_Start": str(fold["test_dates"][0]), "Test_End": str(fold["test_dates"][-1]),
+                         "Settings": _settings_label(fold["settings_json"]), "Tuned_Cashflow": fold["train_pnl"],
+                         "Best_Unsmoothed_Tuned_Cashflow": fold["train_raw_best_pnl"], "Test_Cashflow": fold["test_pnl"]}
+                        for fold in fold_results
+                    ],
+                    "Test_Potential_Cashflow": float(best_pnl),
+                    "Test_Potential_Max_Drawdown": None,
+                    "Test_Potential_Settings": _settings_label(best_json),
+                    "Test_Potential_Settings_JSON": best_json,
+                    "No_Fee_Potential_Cashflow": float(no_fee_pnl),
+                    "No_Fee_Potential_Max_Drawdown": None,
+                    "No_Fee_Potential_Settings": _settings_label(no_fee_json),
+                    "No_Fee_Potential_Settings_JSON": no_fee_json,
+                    "Evaluations": len(entries),
                 }
         else:
             raw_suite = run_strategy_suite(
@@ -821,6 +891,7 @@ def compare_strategies(payload: StrategyComparisonRequest) -> dict[str, Any]:
             },
             "evaluation": {
                 "mode": "out_of_sample_optimization" if payload.optimize else "fixed_defaults",
+                "tuning": "walk_forward_neighbour_smoothed" if payload.optimize else None,
                 "ranking_metric": "Net cashflow",
                 "test_days": payload.test_days if payload.optimize else None,
                 "train_rows": len(train) if train is not None else 0,
@@ -842,6 +913,7 @@ def compare_strategies(payload: StrategyComparisonRequest) -> dict[str, Any]:
                 "days": payload.days,
                 "optimize": payload.optimize,
                 "test_days": payload.test_days,
+                "tune_days": payload.tune_days,
             },
             "battery": asdict(battery),
             "prop": asdict(prop),

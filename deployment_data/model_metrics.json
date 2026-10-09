@@ -1,5 +1,19 @@
 [
   {
+    "Model": "Walk-forward champion",
+    "Model_Type": "Gated nested selection",
+    "Metric_Source": "Walk-forward out-of-sample",
+    "Number_Features": 76,
+    "Test_Start": "2025-11-13T00:00:00Z",
+    "Test_End": "2026-03-04T22:45:00Z",
+    "Test_Rows": 10744,
+    "Test_Coverage_Pct": 99.96278377372532,
+    "MAE": 18.47888761328501,
+    "RMSE": 26.668053256353517,
+    "sMAPE": 21.78906473433565,
+    "R2": 0.5301671600612232
+  },
+  {
     "Model": "Hourly baseline only",
     "Model_Type": "Hourly source baseline",
     "Metric_Source": "Walk-forward out-of-sample",
@@ -28,7 +42,7 @@
     "R2": 0.3523512469098564
   },
   {
-    "Model": "Transfer residual ensemble",
+    "Model": "TL residual simple average",
     "Model_Type": "Transfer learning",
     "Metric_Source": "Walk-forward out-of-sample",
     "Number_Features": 76,
@@ -40,6 +54,20 @@
     "RMSE": 28.737721282987955,
     "sMAPE": 21.85922452689862,
     "R2": 0.4544112599285917
+  },
+  {
+    "Model": "TL residual pure stacking",
+    "Model_Type": "Transfer learning",
+    "Metric_Source": "Walk-forward out-of-sample",
+    "Number_Features": 76,
+    "Test_Start": "2025-11-13T00:00:00Z",
+    "Test_End": "2026-03-04T22:45:00Z",
+    "Test_Rows": 10744,
+    "Test_Coverage_Pct": 99.96278377372532,
+    "MAE": 17.847880713998585,
+    "RMSE": 26.122954297359406,
+    "sMAPE": 20.78923165589929,
+    "R2": 0.5491777697551894
   },
   {
     "Model": "SARIMAX \u2014 Direct 15-minute EPF",

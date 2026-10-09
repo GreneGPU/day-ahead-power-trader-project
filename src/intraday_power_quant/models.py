@@ -170,6 +170,9 @@ def train_stacked_ensemble(X_train: pd.DataFrame, y_train: pd.Series, n_splits: 
         "cat": final_cat,
         "meta": meta_model,
         "feature_cols": list(X_train.columns),
+        # Time-series out-of-fold average of the base models (NaN for the first fold's training rows):
+        # an honest in-sample error estimate, used e.g. to gate whether a model beats a baseline.
+        "oof_average": oof_preds.mean(axis=1),
     }
 
 

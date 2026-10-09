@@ -14,7 +14,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from api.index import StrategyComparisonRequest, compare_strategies
 
 
-SNAPSHOT_HISTORY_DAYS = 30
+SNAPSHOT_HISTORY_DAYS = 40
 
 DEFAULT_BATTERY = {
     "capacity_mwh": 100,
@@ -40,8 +40,8 @@ def build_snapshot(trading_setup: str) -> dict[str, object]:
             forecast_col="Prediction",
             optimize=True,
             test_days=10,
-            # Matches the dashboard's default "History used" window (20 tuning + 10 test days), which keeps
-            # live re-optimization within the serverless time limit.
+            # Matches the dashboard's default "History used" window: 40 days = 2 walk-forward blocks of 10 test
+            # days, each tuned on the 20 days before it; keeps live re-optimization within the time limit.
             days=SNAPSHOT_HISTORY_DAYS,
             trading_setup=trading_setup,
             battery=DEFAULT_BATTERY,

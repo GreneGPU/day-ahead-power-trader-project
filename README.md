@@ -418,9 +418,20 @@ python scripts/build_saved_comparisons.py
 
 `data/raw` needs the thesis modeling datasets with ISO timestamps (the thesis CSVs are day-first, `dd-mm-yy HH:MM`). Energinet's `Forecasts_Hour` has no DK1 data for 22–24 November 2025; those 72 hours of day-ahead wind/solar features come from the modeling dataset's own forecasts and are flagged in `deployment_data/manifest.json`.
 
-Walk-forward accuracy (EUR/MWh): hourly baseline MAE 18.48, transfer residual ensemble 19.81, direct 15-minute ensemble 21.30, TL pure stacking 17.85. The transfer model is weaker than the baseline in the first blocks, when it has only 5–7 weeks of 15-minute training data, and better once more data is available; on the original thesis test window (10 February–4 March) it beats the baseline (17.04 vs 18.28). The champion column was fixed before this run and is not re-selected on these results.
+### Choosing the forecast without hindsight
 
-The Strategy Lab defaults to the final 30 complete days and can test the whole history; the benchmark dashboard defaults to the last 30 days (20 tuning + 10 test) so live re-optimization stays within the serverless time limit.
+The website's `Prediction` series is the **walk-forward champion**, chosen per block with two rules that only use information available before the block:
+
+* **Nested selection:** the candidate (hourly baseline, TL residual average, TL residual stacking, direct 15-minute) with the lowest MAE on all *earlier* blocks' out-of-sample forecasts; the first block uses the configured champion.
+* **Training-CV gate:** a model trained on 15-minute data may only be champion if its time-series cross-validated MAE on that block's *training* data beats the hourly baseline's; otherwise the block falls back to the baseline.
+
+Result: the hourly baseline is champion in all 8 blocks (MAE 18.48 EUR/MWh). The transfer models were worse in the early, data-poor blocks and failed the gate in 7 of 8 blocks. In hindsight TL pure stacking scores best overall (17.85) and the configured TL average 19.81, but no rule using only past information would have selected them here. The gate is conservative (its early CV folds train on little data); a gate based on the last CV folds only is a candidate to validate on future data rather than tune on these results. The ungated transfer forecast remains available as `Transfer_Residual_Prediction`. Per-block champions, gate errors and train-CV vs test errors are written to `outputs/walk_forward/walk_forward_blocks.csv`.
+
+### Benchmark tuning
+
+The benchmark dashboard tunes strategies **walk-forward**: before each 10-day test block, every strategy picks the parameter setting with the best *neighbour-smoothed* P&L over the 20 days before the block (the setting averaged with its adjacent grid settings, so a stable region beats a lone peak) and trades it unchanged on the block. One sweep over the window records each setting's daily P&L, so no fold re-simulates. **OOS kept** reports out-of-sample P&L per day as a share of tuned P&L per day. The default window is the last 40 days (2 blocks). The optimizer loops were moved from per-row pandas indexing to NumPy arrays (identical results, about 9x faster for Prop), and a bug where Prop requests converted the cached price frame to DKK for later battery requests was fixed.
+
+The Strategy Lab defaults to the final 30 complete days and can test the whole history.
 
 ## Strategy Lab
 

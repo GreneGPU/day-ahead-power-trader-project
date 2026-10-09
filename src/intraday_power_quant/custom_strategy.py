@@ -70,7 +70,7 @@ class CustomProp(StrictModel):
 class CustomStrategyRequest(StrictModel):
     name: str = Field(default="Custom strategy", min_length=1, max_length=80)
     trading_setup: Literal["battery", "prop"] = "battery"
-    forecast_col: Literal["Prediction", "Hourly_Baseline", "Direct_15min_Prediction"] = "Prediction"
+    forecast_col: Literal["Prediction", "Hourly_Baseline", "Direct_15min_Prediction", "Transfer_Residual_Prediction"] = "Prediction"
     signal: Literal["formula", "forecast", "baseline_spread", "forecast_change", "csv"] = "baseline_spread"
     formula: str = Field(default="signal = -wind", min_length=1, max_length=500)
     fundamental_records: list[FundamentalRecord] | None = Field(default=None, max_length=20000)

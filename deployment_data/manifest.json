@@ -1,7 +1,7 @@
 {
   "source_forecast_file": "walk_forward_forecasts.csv",
   "source_metrics_file": "walk_forward_metrics.csv",
-  "forecast_method": "walk_forward:14d blocks, expanding window, first after 35d",
+  "forecast_method": "walk_forward:14d blocks, expanding window, first after 35d; champion by earlier-block MAE with a training-CV gate",
   "walk_forward_blocks": 8,
   "rows": 10744,
   "start": "2025-11-13T00:00:00+00:00",
@@ -9,7 +9,8 @@
   "forecast_columns": [
     "Hourly_Baseline",
     "Prediction",
-    "Direct_15min_Prediction"
+    "Direct_15min_Prediction",
+    "Transfer_Residual_Prediction"
   ],
   "feature_columns": [
     "Wind_Offshore_DayAhead_MW",
@@ -27,5 +28,16 @@
   "imbalance_source_url": "https://www.energidataservice.dk/tso-electricity/ImbalancePrice",
   "imbalance_rows": 10744,
   "imbalance_start": "2025-11-13T00:00:00+00:00",
-  "imbalance_end": "2026-03-04T22:45:00+00:00"
+  "imbalance_end": "2026-03-04T22:45:00+00:00",
+  "walk_forward_champions": [
+    "Hourly_Baseline",
+    "Hourly_Baseline",
+    "Hourly_Baseline",
+    "Hourly_Baseline",
+    "Hourly_Baseline",
+    "Hourly_Baseline",
+    "Hourly_Baseline",
+    "Hourly_Baseline"
+  ],
+  "configured_champion": "TL_Residual_Average"
 }
