@@ -175,9 +175,15 @@
     el('labResults').classList.add('stale'); el('labExport').disabled = true;
     status('Rules changed. Run again to update the results.');
   }
+  // The benchmarks open in the setup last used here: remembered on this device and carried in the links.
+  function rememberSetup(setup) {
+    try{localStorage.setItem('power-trader-setup',setup);}catch{}
+    document.querySelectorAll('a[href^="/benchmarks.html"]').forEach(link=>{link.href=`/benchmarks.html?setup=${setup}`;});
+  }
   function updateFields() {
     const csv = el('labSignal').value === 'csv', change = el('labSignal').value === 'forecast_change';
     const prop = el('labSetup').value === 'prop';
+    rememberSetup(el('labSetup').value);
     if (!prop) el('labSizing').value = 'fixed';
     el('labSizing').disabled = busy || !prop;
     document.querySelectorAll('[data-setup]').forEach(button => {button.setAttribute('aria-pressed', String(button.dataset.setup === el('labSetup').value)); button.disabled = busy;});

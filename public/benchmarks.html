@@ -224,7 +224,19 @@
 <footer class="site-footer"><div class="wrap"><span id="sourceNote">Research tooling only &#8212; not financial advice or a production trading system.</span><span><a href="/#model">How it works</a> &#183; <a href="/#lab">Strategy Lab</a> &#183; <a href="/benchmarks.html">Benchmarks</a> &#183; <a href="/api/docs">API</a></span></div></footer>
 <script>
 const $ = selector => document.querySelector(selector);
-const state = { results:null, comparison:null, tradingSetup:new URLSearchParams(location.search).get('setup')==='prop'?'prop':'battery', dirty:false, savedComparisons:new Map(), requestCache:new Map() };
+// Start in the setup the visitor last used: the link's ?setup=, else the Strategy Lab's remembered choice.
+function initialSetup(){
+  const valid=['battery','prop'],fromUrl=new URLSearchParams(location.search).get('setup');
+  if(valid.includes(fromUrl))return fromUrl;
+  try{const saved=localStorage.getItem('power-trader-setup');if(valid.includes(saved))return saved;}catch{}
+  return 'battery';
+}
+function rememberSetup(setup){
+  if(!['battery','prop'].includes(setup))return;
+  try{localStorage.setItem('power-trader-setup',setup);}catch{}
+  const url=new URL(location.href);url.searchParams.set('setup',setup);history.replaceState(null,'',url);
+}
+const state = { results:null, comparison:null, tradingSetup:initialSetup(), dirty:false, savedComparisons:new Map(), requestCache:new Map() };
 const dkk = new Intl.NumberFormat('en-DK',{maximumFractionDigits:0});
 const colors = { actual:'#0a2540', forecast:'#533afd', imbalance:'#d97706', charge:'#f97316', discharge:'#0891b2', grid:'#e6ebf1', muted:'#5f6f86', green:'#0b8a5e', red:'#cf2e5b' };
 const modelNames = { Prediction:'Walk-forward champion', Hourly_Baseline:'Hourly baseline only', Direct_15min_Prediction:'Direct 15-min ensemble', Transfer_Residual_Prediction:'TL residual simple average' };
@@ -459,6 +471,7 @@ async function loadDashboard(){
 
 function setTradingSetup(setup){
   if(setup===state.tradingSetup)return;
+  rememberSetup(setup);
   loadSavedDashboard(setup);
 }
 
