@@ -1,4 +1,4 @@
-// Introduction film: a 54-second animated walkthrough drawn on a canvas, from data gathering to trading.
+// Introduction film: a 64-second animated walkthrough drawn on a canvas, from data gathering to trading.
 // Every frame is a pure function of the time, so play, pause, seek and chapters all share one renderer.
 (() => {
   'use strict';
@@ -6,7 +6,7 @@
   if (!root) return;
   const el = id => document.getElementById(id);
   const canvas = el('filmCanvas'), ctx = canvas.getContext('2d'), stage = canvas.parentElement;
-  const C = {bg:'#0d1738', panel:'#131f47', line:'#26335f', text:'#e8ecf8', muted:'#9aa8cc', train:'#3b4a86',
+  const C = {bg:'#0d1738', panel:'#131f47', line:'#26335f', text:'#e8ecf8', muted:'#9aa8cc', train:'#3b4a86', direct:'#c4861c', transfer:'#7480e8',
     price:'#a5b4fc', green:'#4fe0b0', amber:'#f5b54a', pink:'#ff8fab', cyan:'#7dd3fc'};
   const SANS = '-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,Arial,sans-serif', MONO = 'ui-monospace,SFMono-Regular,Consolas,Menlo,monospace';
   let W = 960, H = 540, narrow = false, fade = 1;
@@ -144,7 +144,34 @@
     if (px + ctx.measureText(stack).width + 12 < x1) text(stack, x1, eqY + F(12) * .36, {size: 12, color: C.muted, align: 'right', mono: true, a: prog(t, 8.2, 9)});
   }
 
-  // ---- Scene 4: validate ----
+  // ---- Scene 4: compare (model families, each trained directly and with transfer learning) ----
+  // MAE in EUR/MWh. Trees: 8-block walk-forward. SARIMAX, LSTM, CNN-LSTM: the thesis comparison's test split.
+  const families = [['Tree ensembles', 'XGBoost · LightGBM · CatBoost', 21.30, 19.81], ['SARIMAX', 'seasonal statistical model', 20.05, 18.66],
+    ['LSTM', 'recurrent neural network', 22.06, 24.78], ['CNN-LSTM', 'convolutional + recurrent network', 19.87, 19.29]];
+  function compare(t) {
+    const x0 = W * (narrow ? .06 : .31), x1 = W * (narrow ? .6 : .78), top = H * .3, slot = H * (narrow ? .152 : .135), barH = Math.max(6, H * .02), ly = H * .2;
+    const shown = prog(t, .2, .9), firstLabel = narrow ? 'direct' : 'trained directly on 15-min data';
+    ctx.font = `400 ${F(11.5)}px ${SANS}`; const second = W * .06 + 18 + ctx.measureText(firstLabel).width + 20;
+    fillBox(W * .06, ly - 9, 12, 10, C.direct, shown, 2); text(firstLabel, W * .06 + 18, ly, {size: 11.5, color: C.muted, a: shown});
+    fillBox(second, ly - 9, 12, 10, C.transfer, shown, 2); text(narrow ? '+ transfer' : '+ transfer learning from the hourly model', second + 18, ly, {size: 11.5, color: C.muted, a: shown});
+    text(narrow ? 'MAE' : 'MAE · EUR/MWh', W * .94, ly, {size: 11.5, color: C.muted, align: 'right', a: shown});
+    families.forEach(([name, detail, direct, transfer], i) => {
+      const start = 1 + i * .9, y = top + i * slot, bars = narrow ? y + F(12) + 6 : y;
+      text(name, W * .06, narrow ? y + F(12) : y + barH + 1, {size: 13, weight: 600, a: prog(t, start, start + .5)});
+      if (!narrow) text(detail, W * .06, y + barH + F(11) + 6, {size: 11, color: C.muted, a: prog(t, start, start + .5)});
+      [[direct, C.direct, start], [transfer, C.transfer, start + .5]].forEach(([value, color, begin], k) => {
+        const grow = prog(t, begin, begin + .7), by = bars + k * (barH + 4), length = (x1 - x0) * value / 26 * grow;
+        fillBox(x0, by, length, barH, color, grow, barH / 2);
+        text(value.toFixed(2), x0 + length + 7, by + barH - 1, {size: 11, mono: true, a: prog(t, begin + .4, begin + .8)});
+      });
+      const change = (transfer - direct) / direct * 100;
+      text(`${Math.abs(change).toFixed(1)}% ${change < 0 ? 'lower' : 'higher'}`, W * .94, bars + barH + 5, {size: 12.5, weight: 600, align: 'right', a: prog(t, start + 1.1, start + 1.6)});
+    });
+    text(narrow ? 'Compare within a pair, not across.' : 'Trees: 8-block walk-forward. SARIMAX and the neural networks: the thesis test split. Compare within a pair, not across.',
+      W * .06, H * .92, {size: 11.5, color: C.muted, a: prog(t, 6.2, 7)});
+  }
+
+  // ---- Scene 5: validate ----
   const errors = [['Transfer, stacked', 17.85, 'best only in hindsight'], ['Hourly baseline', 18.48, 'selected, all 8 blocks'], ['Transfer, averaged', 19.81, ''], ['Direct 15-minute', 21.30, '']];
   function validate(t) {
     // Wide: the walk-forward diagram and the error bars sit side by side. Narrow: one after the other, full size.
@@ -173,7 +200,7 @@
       dx0, H * .92, {size: 13.5, weight: 600, a: prog(t, 8.2, 9)});
   }
 
-  // ---- Scene 5: trade (a schematic path: held intervals win and lose, costs are paid on every change) ----
+  // ---- Scene 6: trade (a schematic path: held intervals win and lose, costs are paid on every change) ----
   const signal = Array.from({length: 61}, (_, i) => .78 * Math.sin(i * .21 + .4) + .2 * Math.sin(i * .63));
   const position = signal.map(value => value > .5 ? 1 : value < -.5 ? -1 : 0);
   const pnl = position.reduce((path, pos, i) => { path.push(path[i] + Math.abs(pos) * (.03 + .075 * Math.sin(i * 1.7)) - Math.abs(pos - (position[i - 1] || 0)) * .03); return path; }, [0]).slice(1);
@@ -209,6 +236,7 @@
     {title: 'Gather', dur: 9, draw: gather, caption: 'Gather. More than five years of hourly DK1 market data and five months at 15-minute resolution: load, wind and solar forecasts from ENTSO-E, prices and system data from Energinet, plus weather and gas prices.'},
     {title: 'Clean', dur: 9, draw: clean, caption: 'Clean. Every series goes onto one UTC clock and coverage is checked; a 72-hour hole in the wind and solar forecasts is filled and flagged. Each row then gets only values known before the auction, lagged by one, two and seven days: 76 features.'},
     {title: 'Model', dur: 11, draw: model, caption: 'Model. An ensemble trained on the long hourly history gives every quarter-hour a baseline. A second ensemble learns the 15-minute correction on top of it: transfer learning plus residual learning. A direct 15-minute model is kept as a benchmark.'},
+    {title: 'Compare', dur: 10, draw: compare, caption: 'Compare. The same idea was tested on four model families: gradient-boosted tree ensembles, SARIMAX, an LSTM and a CNN-LSTM, each trained directly on 15-minute data and again with transfer learning from the hourly model. Transfer lowered the error for the trees, SARIMAX and the CNN-LSTM, and raised it for the LSTM.'},
     {title: 'Validate', dur: 11, draw: validate, caption: 'Validate. Walk-forward: retrain on everything earlier, forecast the next 14 days, eight times. A model is only used if it beat the baseline on earlier data, and the hourly baseline was chosen in all eight blocks. Stacking scored best, but only in hindsight.'},
     {title: 'Trade', dur: 10, draw: trade, caption: 'Trade. A rule turns the forecast into long, short or flat. Positions are sized, costed and settled, then checked with walk-forward tuning, significance tests and a portfolio view.'},
     {title: '', dur: 4, draw: outro, caption: 'Now test your own rule in the Strategy Lab below.'},
