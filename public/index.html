@@ -36,27 +36,31 @@
 </header>
 
 <main>
-  <section class="hero" aria-labelledby="hero-title">
+  <section class="hero hero-film" aria-labelledby="hero-title">
     <div class="hero-guides" aria-hidden="true"></div>
     <div class="ribbon" aria-hidden="true"></div>
     <div class="wrap">
       <div class="hero-copy">
         <span class="eyebrow">Jakob Grene &#183; <b>Quantitative energy trading research</b></span>
         <h1 class="display" id="hero-title">Day-ahead power, from forecast to bid. <span class="soft">A transfer-learning model that turns DK1 market data into 15-minute price forecasts, trading signals and decisions you can replay.</span></h1>
-        <div class="hero-actions"><a class="btn btn-primary" href="#lab">Try the Strategy Lab <span class="chev" aria-hidden="true">&#8250;</span></a><a class="btn btn-outline" href="#model"><span aria-hidden="true">&#9654;&#160;</span>Watch how it works &#183; 1 min</a></div>
+        <div class="hero-actions"><a class="btn btn-primary" href="#lab">Try the Strategy Lab <span class="chev" aria-hidden="true">&#8250;</span></a><a class="btn btn-outline" href="#model">See how the model works</a></div>
       </div>
       <div class="hero-visual">
-        <figure class="product-card" style="margin:0" aria-label="The model: an hourly baseline plus a learned 15-minute residual">
-          <span class="card-kicker">TRANSFER LEARNING</span>
-          <h3>A familiar market.<br>A finer resolution.</h3>
-          <div class="equation"><span>Hourly<b>baseline</b></span><i aria-hidden="true">+</i><span>15-minute<b>residual</b></span></div>
-          <svg viewBox="0 0 360 110" fill="none" aria-hidden="true">
-            <path d="M0 26H360M0 55H360M0 84H360" stroke="#eef1f6"/>
-            <path d="M0 78H45V70H90V58H135V50H180V44H225V52H270V36H315V30H360" stroke="#0a2540" stroke-width="1.6" stroke-dasharray="5 5"/>
-            <path d="M0 82L11 76L22 79L34 72L45 74L56 66L68 71L79 63L90 61L101 55L113 59L124 47L135 52L146 45L158 49L169 40L180 46L191 41L203 47L214 39L225 50L236 54L248 47L259 56L270 40L281 33L293 38L304 27L315 33L326 25L338 31L349 22L360 28" stroke="#533afd" stroke-width="2.4" stroke-linejoin="round"/>
-          </svg>
-          <div class="caption"><span class="legend-line" style="color:#533afd">15-minute forecast</span><span class="legend-line dashed" style="color:#0a2540">Hourly baseline</span></div>
-          <div class="decision-chip"><span class="live-dot" aria-hidden="true"></span><span><small>YOUR STRATEGY</small>Signal &#8594; position &#8594; outcome</span></div>
+        <figure class="film" id="introFilm" aria-label="Introduction: how the model works, in one minute">
+          <div class="film-stage">
+            <canvas id="filmCanvas" role="img" aria-label="Animated introduction in six chapters: gather, clean, model, train, validate, trade. The caption and transcript below carry the same content as text."></canvas>
+            <span class="film-chip" id="filmChip" aria-hidden="true"></span>
+            <button type="button" class="film-bigplay" id="filmBigPlay" aria-label="Play the introduction">&#9654;</button>
+            <div class="film-end" id="filmEnd" hidden><a class="btn btn-primary" href="#lab">Open the Strategy Lab <span class="chev" aria-hidden="true">&#8250;</span></a><button type="button" class="film-ghost" id="filmReplay">Replay</button></div>
+          </div>
+          <div class="film-bar">
+            <button type="button" class="film-play" id="filmPlay" aria-label="Play the introduction">&#9654;</button>
+            <input type="range" id="filmSeek" min="0" max="64" step="0.1" value="0" aria-label="Position in the introduction, in seconds">
+            <span class="film-time" id="filmTime">0:00 / 1:04</span>
+          </div>
+          <div class="film-chapters" id="filmChapters" aria-label="Chapters"></div>
+          <figcaption class="film-caption" id="filmCaption"></figcaption>
+          <details class="film-transcript"><summary>Read the transcript</summary><ol id="filmTranscript"></ol></details>
         </figure>
       </div>
     </div>
@@ -80,22 +84,6 @@
         <span class="kicker">01 / How it works</span>
         <div><h2 class="display" id="model-title">From raw data to a bid. <span class="soft">Five steps turn market observations into a forecast, the forecast into a signal, and the signal into a position you can replay.</span></h2></div>
       </div>
-      <figure class="film" id="introFilm" aria-label="Introduction: how the model works, in one minute">
-        <div class="film-stage">
-          <canvas id="filmCanvas" role="img" aria-label="Animated introduction in six chapters: gather, clean, model, train, validate, trade. The caption and transcript below carry the same content as text."></canvas>
-          <span class="film-chip" id="filmChip" aria-hidden="true"></span>
-          <button type="button" class="film-bigplay" id="filmBigPlay" aria-label="Play the introduction">&#9654;</button>
-          <div class="film-end" id="filmEnd" hidden><a class="btn btn-primary" href="#lab">Open the Strategy Lab <span class="chev" aria-hidden="true">&#8250;</span></a><button type="button" class="film-ghost" id="filmReplay">Replay</button></div>
-        </div>
-        <div class="film-bar">
-          <button type="button" class="film-play" id="filmPlay" aria-label="Play the introduction">&#9654;</button>
-          <input type="range" id="filmSeek" min="0" max="64" step="0.1" value="0" aria-label="Position in the introduction, in seconds">
-          <span class="film-time" id="filmTime">0:00 / 1:04</span>
-        </div>
-        <div class="film-chapters" id="filmChapters" aria-label="Chapters"></div>
-        <figcaption class="film-caption" id="filmCaption"></figcaption>
-        <details class="film-transcript"><summary>Read the transcript</summary><ol id="filmTranscript"></ol></details>
-      </figure>
       <div class="steps" role="tablist" aria-label="Model stages">
         <button type="button" role="tab" id="tab-data" aria-selected="true" aria-controls="stage-data"><span class="num">01</span><span class="arrow" aria-hidden="true">&#8594;</span><b>Raw data</b><small>Observe the physical market.</small></button>
         <button type="button" role="tab" id="tab-features" aria-selected="false" aria-controls="stage-features" tabindex="-1"><span class="num">02</span><span class="arrow" aria-hidden="true">&#8594;</span><b>Features</b><small>Align only what was known.</small></button>

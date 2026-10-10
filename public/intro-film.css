@@ -1,6 +1,10 @@
-/* Introduction film: canvas stage with video-style controls, chapters and captions. */
-.film{margin:0 0 64px}
-.film-stage{position:relative;aspect-ratio:16/9;border-radius:12px;overflow:hidden;background:var(--navy);box-shadow:var(--shadow)}
+/* Introduction film: a card in the hero holding a canvas stage with video-style controls, chapters and captions. */
+.hero-film .wrap{grid-template-columns:minmax(0,.82fr) minmax(0,1.18fr);gap:48px;padding:72px 0 80px}
+@media (min-width:1001px){.hero-film .display{font-size:clamp(36px,3.6vw,46px)}}
+/* Mid-width screens: give the film more of the row so its stage stays wide enough for the 16:9 scene layouts. */
+@media (min-width:1001px) and (max-width:1240px){.hero-film .wrap{grid-template-columns:minmax(0,.62fr) minmax(0,1.38fr);gap:40px}}
+.film{margin:0;padding:12px 12px 14px;border-radius:14px;background:#fff;box-shadow:var(--shadow);container-type:inline-size}
+.film-stage{position:relative;aspect-ratio:16/9;border-radius:8px;overflow:hidden;background:var(--navy)}
 .film-stage canvas{position:absolute;inset:0;width:100%;height:100%;display:block;cursor:pointer}
 .film-chip{position:absolute;top:4.5%;left:5%;color:var(--navy-muted);font:600 11px var(--mono);letter-spacing:.1em;text-transform:uppercase;pointer-events:none}
 .film-bigplay{position:absolute;inset:0;margin:auto;width:76px;height:76px;border:0;border-radius:50%;background:var(--accent);color:#fff;font-size:26px;padding-left:6px;cursor:pointer;box-shadow:0 12px 30px -8px rgba(83,58,253,.7)}
@@ -9,37 +13,33 @@
 .film-end[hidden],.film-bigplay[hidden]{display:none}
 .film-ghost{border:1px solid var(--navy-line);border-radius:999px;background:transparent;color:var(--navy-text);font:500 14px var(--font);padding:9px 18px;cursor:pointer}
 .film-ghost:hover{border-color:var(--navy-muted)}
-.film-bar{display:flex;align-items:center;gap:14px;margin-top:14px}
-.film-play{flex:0 0 38px;height:38px;border:1px solid var(--line-strong);border-radius:50%;background:#fff;color:var(--accent);font-size:12px;cursor:pointer}
+.film-bar{display:flex;align-items:center;gap:14px;margin-top:12px;padding:0 4px}
+.film-play{flex:0 0 36px;height:36px;border:1px solid var(--line-strong);border-radius:50%;background:#fff;color:var(--accent);font-size:12px;cursor:pointer}
 .film-play:hover{border-color:var(--accent)}
 .film-bar input[type=range]{flex:1;min-width:0;width:auto;height:4px;min-height:0;margin:0;padding:0;border:0;box-shadow:none;border-radius:2px;appearance:none;-webkit-appearance:none;cursor:pointer;
   background:linear-gradient(to right,var(--accent) var(--played,0%),var(--line-strong) var(--played,0%))}
 .film-bar input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;border-radius:50%;background:var(--accent);border:2px solid #fff;box-shadow:0 1px 4px rgba(10,37,64,.3)}
 .film-bar input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;background:var(--accent);border:2px solid #fff}
 .film-time{flex:0 0 auto;color:var(--muted);font:12px var(--mono);font-variant-numeric:tabular-nums}
-.film-chapters{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:0;margin-top:14px;border-top:1px solid var(--line)}
-.film-chapters button{display:flex;align-items:baseline;gap:8px;padding:12px 4px 0;border:0;border-top:2px solid transparent;margin-top:-1px;background:none;color:var(--muted);font:14px var(--font);text-align:left;cursor:pointer}
-.film-chapters button span{font:600 11px var(--mono);color:var(--muted)}
+.film-chapters{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:0;margin:12px 4px 0;border-top:1px solid var(--line)}
+.film-chapters button{display:flex;align-items:baseline;gap:6px;padding:10px 2px 0;border:0;border-top:2px solid transparent;margin-top:-1px;background:none;color:var(--muted);font:13px var(--font);text-align:left;cursor:pointer;white-space:nowrap}
+.film-chapters button span{font:600 10.5px var(--mono);color:var(--muted)}
 .film-chapters button b{font-weight:500}
 .film-chapters button:hover{color:var(--ink)}
 .film-chapters button[aria-current=true]{border-top-color:var(--accent);color:var(--ink)}
 .film-chapters button[aria-current=true] span{color:var(--accent)}
-.film-caption{margin:18px 0 0;max-width:86ch;min-height:4.8em;color:var(--text);font-size:15px;line-height:1.6}
-.film-transcript{margin-top:6px;color:var(--muted);font-size:13px}
+.film-caption{margin:14px 4px 0;min-height:6.4em;color:var(--text);font-size:14px;line-height:1.6}
+.film-transcript{margin:4px 4px 0;color:var(--muted);font-size:13px}
 .film-transcript summary{cursor:pointer;color:var(--accent);font-weight:500}
-.film-transcript ol{margin:10px 0 0;padding-left:20px;max-width:86ch;line-height:1.6}
+.film-transcript ol{margin:10px 0 0;padding-left:20px;line-height:1.6}
 .film-transcript li+li{margin-top:6px}
 .film-play:focus-visible,.film-bigplay:focus-visible,.film-chapters button:focus-visible,.film-ghost:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-@media (max-width:760px){
-  .film-stage{aspect-ratio:4/3;border-radius:10px}
-  .film-chapters{grid-template-columns:repeat(6,auto);overflow-x:auto}
-  .film-chapters button{padding-right:14px;font-size:13px}
-  .film-caption{min-height:8em;font-size:14px}
+/* The stage goes square, with simpler scene layouts (see `narrow` in intro-film.js), when the card itself is narrow. */
+@container (max-width:560px){
+  .film-stage{aspect-ratio:1/1}
+  .film-chapters button{font-size:11.5px}
+  .film-chapters button span{display:none}
+  .film-caption{min-height:11.2em}
   .film-bigplay{width:60px;height:60px;font-size:20px}
 }
-@media (max-width:560px){
-  .film-stage{aspect-ratio:1/1}
-  .film-chapters{grid-template-columns:repeat(6,minmax(0,1fr));overflow:visible}
-  .film-chapters button{padding-right:0;font-size:11.5px}
-  .film-chapters button span{display:none}
-}
+@media (max-width:1000px){.hero-film .wrap{grid-template-columns:1fr}.hero-film .hero-visual{max-width:none}}

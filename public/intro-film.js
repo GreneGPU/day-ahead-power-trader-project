@@ -146,7 +146,7 @@
 
   // ---- Scene 4: train (every model family was trained two ways: directly, and with transfer learning) ----
   const families = [['Tree ensembles', 'gradient-boosted trees'], ['SARIMAX', 'seasonal statistics'],
-    ['LSTM', 'recurrent network'], ['CNN-LSTM', 'convolution + recurrent']];
+    ['LSTM', 'recurrent network'], ['CNN-LSTM', 'conv + recurrent']];
   function node(x, y, w, h, title, sub, color, a) {
     fillBox(x, y, w, h, C.panel, a, 8); strokeBox(x, y, w, h, color, a * .9, 8);
     const hasSub = sub && !narrow;
@@ -169,21 +169,22 @@
     text(narrow ? 'DIRECT' : 'DIRECT · FROM SCRATCH', left, yA - 8, {size: 10.5, color: C.muted, mono: true, a: prog(t, .2, .7)});
     node(left, yA, bw, bh, narrow ? '15-min data' : '15-minute data', '14,108 quarter-hours', C.direct, prog(t, .2, .8));
     arrow(left + bw + 6, right - last - 6, yA + bh / 2, C.direct, t, .8);
-    node(right - last, yA, last, bh, narrow ? '15-min model' : '15-minute model', 'learns from 15-minute data only', C.direct, prog(t, 1.2, 1.8));
+    node(right - last, yA, last, bh, narrow ? '15-min model' : '15-minute model', '15-minute data only', C.direct, prog(t, 1.2, 1.8));
     text('TRANSFER LEARNING', left, yB - 8, {size: 10.5, color: C.muted, mono: true, a: prog(t, 2, 2.5)});
     node(left, yB, bw, bh, 'Hourly data', '47,066 hours', C.transfer, prog(t, 2, 2.6));
     arrow(left + bw + 6, mid - 6, yB + bh / 2, C.transfer, t, 2.6);
     node(mid, yB, bw, bh, narrow ? 'Hourly model' : 'Hourly source model', 'trained first', C.transfer, prog(t, 3, 3.6));
     arrow(mid + bw + 6, right - last - 6, yB + bh / 2, C.transfer, t, 3.6, 'transfer');
-    node(right - last, yB, last, bh, narrow ? '15-min model' : '15-minute model', 'hourly knowledge + 15-minute data', C.transfer, prog(t, 4, 4.6));
+    node(right - last, yB, last, bh, narrow ? '15-min model' : '15-minute model', 'builds on the hourly model', C.transfer, prog(t, 4, 4.6));
 
-    const cols = narrow ? 2 : 4, gap = W * .015, cw = (right - left - gap * (cols - 1)) / cols, cy = H * (narrow ? .56 : .63), ch = H * (narrow ? .135 : .17);
+    const cols = narrow ? 2 : 4, gap = W * .015, cw = (right - left - gap * (cols - 1)) / cols, cy = H * (narrow ? .56 : .62), ch = H * (narrow ? .135 : .2);
     const place = i => [left + (i % cols) * (cw + gap), cy + Math.floor(i / cols) * (ch + gap)];
     families.forEach(([name, detail], i) => {
       const start = 4.8 + i * .45, a = prog(t, start, start + .5), [x, y] = place(i);
       fillBox(x, y, cw, ch, C.panel, a, 8); strokeBox(x, y, cw, ch, C.line, a, 8);
       text(name, x + 12, y + F(13) + 9, {size: 13, weight: 600, a});
-      if (!narrow) text(detail, x + 12, y + F(13) + F(10.5) + 14, {size: 10.5, color: C.muted, a});
+      ctx.font = `400 ${F(10.5)}px ${SANS}`;
+      if (!narrow && ctx.measureText(detail).width < cw - 20) text(detail, x + 12, y + F(13) + F(10.5) + 13, {size: 10.5, color: C.muted, a});
       [['direct', C.direct, .3], ['+ transfer', C.transfer, .6]].forEach(([label, color, delay], k) => {
         const on = prog(t, start + delay, start + delay + .4), bx = x + 12 + k * cw * .42, by = y + ch - 12;
         fillBox(bx, by - 8, 8, 8, color, on, 4); text(label, bx + 13, by, {size: 10.5, a: on});
@@ -311,7 +312,7 @@
   }
   function resize() {
     const rect = stage.getBoundingClientRect(); if (!rect.width) return;
-    const scale = window.devicePixelRatio || 1; W = rect.width; H = rect.height; narrow = W < 560;
+    const scale = window.devicePixelRatio || 1; W = rect.width; H = rect.height; narrow = W <= 560;
     canvas.width = Math.round(W * scale); canvas.height = Math.round(H * scale); render();
   }
 
