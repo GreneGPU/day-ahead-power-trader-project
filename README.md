@@ -26,6 +26,8 @@ To activate:
    counts, pageviews, referring sites, and visit duration. These are visits recorded
    after activation; historical visits cannot be recovered by this integration.
 
+**Tracking visits from a CV.** Link the project as `greneportfolio.vercel.app/cv/<application>` (for example `/cv/orsted`), or plain `/cv`. `vercel.json` redirects these to the landing page with `utm_source=cv`, `utm_medium=pdf` and `utm_campaign=<application>` (plain `/cv` uses `cv`), which PostHog records on the visit, so Web analytics shows how many visits came from which CV. The redirect is temporary (307), so the target can change later.
+
 `/api/analytics-config` exposes only the public token and ingestion host. Analytics
 loads independently of the dashboard, so blocked requests or PostHog outages do
 not stop charts or calculations. Automatic interaction capture, session recordings,

@@ -12,5 +12,17 @@
       "source": "/",
       "destination": "/index.html"
     }
+  ],
+  "redirects": [
+    {
+      "source": "/cv",
+      "destination": "/?utm_source=cv&utm_medium=pdf&utm_campaign=cv",
+      "permanent": false
+    },
+    {
+      "source": "/cv/:campaign",
+      "destination": "/?utm_source=cv&utm_medium=pdf&utm_campaign=:campaign",
+      "permanent": false
+    }
   ]
 }
