@@ -262,6 +262,9 @@ input[type=file]{padding:8px;font-size:12px}
 .pf-l-book{background:var(--p-long)}.pf-l-sum{background:repeating-linear-gradient(90deg,var(--p-price) 0 4px,transparent 4px 7px)}
 .pf-l-exp{height:8px!important;width:8px!important;background:rgba(165,180,252,.45)}
 #portfolioCanvas{display:block;width:100%;height:220px}
+.pf-rolling[hidden],.pf-weight-chart[hidden],#pfLegendEqual[hidden]{display:none}
+.pf-l-eq{background:repeating-linear-gradient(90deg,#e8ecf8 0 2px,transparent 2px 5px)}
+#pfWeightCanvas{display:block;width:100%;height:150px}
 .pf-corr{margin-top:16px}
 .pf-corr .table-wrap{margin-top:8px;max-width:100%}
 #pfCorr td,#pfCorr th{text-align:center;min-width:64px!important}

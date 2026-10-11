@@ -8,7 +8,7 @@ import math
 import os
 from pathlib import Path
 import sys
-from typing import Any
+from typing import Any, Literal
 
 import pandas as pd
 from fastapi import FastAPI, HTTPException, Response
@@ -32,7 +32,7 @@ from intraday_power_quant.custom_strategy import (
     run_custom_strategy,
 )
 from intraday_power_quant.latest_prices import latest_prices
-from intraday_power_quant.portfolio import book_period_summary, simulate_battery_book, simulate_book
+from intraday_power_quant.portfolio import book_period_summary, rolling_weights, simulate_battery_book, simulate_book
 from intraday_power_quant.lab_presets import LAB_NOTE, preset_rule_text, presets_for_setup, run_presets
 from intraday_power_quant.significance import significance_tests
 from intraday_power_quant.tuning import (
@@ -483,6 +483,11 @@ class PortfolioRobustnessRequest(BaseModel):
     weights: list[float]
     cap_mwh: float = Field(default=0.0, ge=0, le=1e6)
     daily_loss_limit_dkk: float = Field(default=0.0, ge=0, le=1e12)
+    # "rolling": weights follow each run's share of the recent profit (see portfolio.rolling_weights).
+    weighting: Literal["fixed", "rolling"] = "fixed"
+    rolling_window_days: int = Field(default=10, ge=2, le=60)
+    rolling_tilt: float = Field(default=0.5, ge=0, le=1)
+    rolling_cap: float = Field(default=2.0, ge=1, le=10)
 
 
 @app.post("/api/portfolio/robustness")
@@ -511,18 +516,29 @@ def portfolio_robustness(payload: PortfolioRobustnessRequest) -> dict[str, Any]:
     battery = BatteryConfig(**payload.runs[0].battery.model_dump())
     periods: dict[str, Any] = {}
     test_book = None
-    for (name, frames), label in zip(per_period.items(), labels):
+    rolling = payload.weighting == "rolling"
+
+    def simulate(frames: list[pd.DataFrame], weights: Any) -> pd.DataFrame:
         if setup == "battery":  # one shared battery; cap_mwh is read as a power cap in MW
-            book = simulate_battery_book(frames, payload.weights, battery, payload.cap_mwh, payload.daily_loss_limit_dkk)
-        else:
-            book = simulate_book(frames, payload.weights, cost_rate, payload.cap_mwh, payload.daily_loss_limit_dkk)
+            return simulate_battery_book(frames, weights, battery, payload.cap_mwh, payload.daily_loss_limit_dkk)
+        return simulate_book(frames, weights, cost_rate, payload.cap_mwh, payload.daily_loss_limit_dkk)
+
+    for (name, frames), label in zip(per_period.items(), labels):
+        weights: Any = payload.weights
+        if rolling:  # each period starts with equal weights until it has a full window, as in the browser
+            weights = rolling_weights(frames, payload.rolling_window_days, payload.rolling_tilt, payload.rolling_cap,
+                                      utc_days=setup == "battery")
+        book = simulate(frames, weights)
         periods[name] = {"label": label, **book_period_summary(book)}
+        if rolling:
+            periods[name]["equal_weight_cashflow"] = float(simulate(frames, [1.0] * len(frames))["Cashflow"].sum())
         if name == "test":
             test_book = book
     return _clean_json({
         "periods": periods,
         "significance": significance_tests(test_book),
         "members": len(payload.runs),
+        "weighting": payload.weighting,
         "trading_setup": setup,
         "evaluation": payload.runs[0].evaluation,
     })

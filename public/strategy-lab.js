@@ -7,6 +7,9 @@
   let fundamentals = null;
   let initialReplay = true;
   let replayCursor = 0, replayTimer = null, runSerial = 0;
+  // While playing, the replay position is fractional (replayFloat) so the chart glides; replayCursor is its whole part.
+  let replayFloat = 0, lastHeavyRender = 0;
+  const axis = {key:'', price:null, signal:null};
   const triedRules = new Set();
   const runs = [], runColors = ['#4fe0b0','#a5b4fc','#f5b54a','#ff8fab','#7dd3fc'];
   const chartFont = '11px ui-monospace,SFMono-Regular,Consolas,monospace';
@@ -87,7 +90,10 @@
     const observer=new IntersectionObserver(entries=>{if(entries.some(entry=>entry.isIntersecting)){observer.disconnect();start();}},{rootMargin:'0px 0px -40% 0px'});
     observer.observe(el('replayWorkspace'));
   }
-  function pauseReplay() {clearInterval(replayTimer);replayTimer=null;el('replayPlay').textContent='Play';}
+  function pauseReplay() {
+    if(replayTimer&&result)replayCursor=Math.min(result.intervals.length,Math.max(replayCursor,Math.floor(replayFloat)));
+    cancelAnimationFrame(replayTimer);replayTimer=null;el('replayPlay').textContent='Play';
+  }
   function addRun(data) {pauseReplay();insertRun(data);}
   // Add a run to the comparison and book. Runs on other timestamps or another setup start a new comparison;
   // the same rule run again replaces its earlier copy, so it is never counted twice. With ``slot`` the run
@@ -306,7 +312,7 @@
     ctx.fillText(compact(high),right+8,top+8); ctx.fillText(compact(low),right+8,bottom-2);
     drawSignal();
   }
-  function drawSignal(pointer = null) {
+  function drawSignal(pointer = null, light = false) {
     if (!result || el('replayWorkspace').hidden) return;
     const canvas=el('signalCanvas'), rect=canvas.getBoundingClientRect(), scale=window.devicePixelRatio||1;
     if (!rect.width) return;
@@ -315,7 +321,10 @@
     // The x-axis spans a fixed window (1 day, 1 week or the whole test); it fills left to right, then scrolls.
     const span=el('chartWindow').value==='all'?result.intervals.length:Number(el('chartWindow').value);
     const slots=Math.max(2,Math.min(span,result.intervals.length));
-    const start=Math.max(0,replayCursor-slots), rows=result.intervals.slice(start,replayCursor);
+    // While playing, the position is fractional: the window scrolls and the newest point is interpolated.
+    const total=result.intervals.length, pos=replayTimer?Math.min(total,Math.max(replayCursor,replayFloat)):replayCursor;
+    const cursor=Math.floor(pos), frac=cursor<total?pos-cursor:0, origin=Math.max(0,pos-slots);
+    const start=Math.max(0,Math.floor(origin)), rows=result.intervals.slice(start,cursor);
     const left=65,right=rect.width-16,width=right-left,top=16,priceBottom=rect.height*.55,signalTop=rect.height*.67,bottom=rect.height-28;
     ctx.fillStyle='#9aa8cc';ctx.fillText('SIGNAL · formula output units',left,signalTop-14);
     if (!rows.length) {
@@ -326,11 +335,22 @@
     }
     const extent=values=>{const lo=Math.min(...values),hi=Math.max(...values),pad=Math.max((hi-lo)*.12,1);return [lo-pad,hi+pad];};
     // The price forecast the strategy traded on, from the selected forecast model (known day-ahead).
-    const forecasts=(result.factors?.forecast||[]).slice(start,replayCursor);
-    const [priceMin,priceMax]=extent([...rows.map(row=>row.Actual_Price),...forecasts.filter(Number.isFinite)]);
+    const forecasts=(result.factors?.forecast||[]).slice(start,cursor);
+    // The axes ease towards a new range while playing, so a new high or low does not make the lines jump.
+    const axisKey=`${result.runId}|${slots}`, ease=(name,target)=>{
+      const shown=axis[name];
+      if(!replayTimer||axis.key!==axisKey||!shown)return axis[name]=target;
+      return axis[name]=[shown[0]+(target[0]-shown[0])*.2,shown[1]+(target[1]-shown[1])*.2];
+    };
+    const [priceMin,priceMax]=ease('price',extent([...rows.map(row=>row.Actual_Price),...forecasts.filter(Number.isFinite)]));
     const signals=rows.map(row=>row.Custom_Signal).filter(Number.isFinite);
-    const [signalMin,signalMax]=extent([...signals,result.settings.lower,result.settings.upper]);
-    const x=i=>left+i/(slots-1)*width;
+    const [signalMin,signalMax]=ease('signal',extent([...signals,result.settings.lower,result.settings.upper]));
+    axis.key=axisKey;
+    const x=i=>left+(start+i-origin)/(slots-1)*width;
+    // Values part-way to the next interval, drawn as the moving head of each line.
+    const next=frac?result.intervals[cursor]:null, blend=(a,b)=>Number.isFinite(a)&&Number.isFinite(b)?a+(b-a)*frac:null;
+    const head={price:next?blend(rows.at(-1).Actual_Price,next.Actual_Price):null, forecast:next?blend(forecasts.at(-1),result.factors?.forecast?.[cursor]):null,
+      signal:next?blend(rows.at(-1).Custom_Signal,next.Custom_Signal):null};
     const priceY=value=>priceBottom-(value-priceMin)/(priceMax-priceMin)*(priceBottom-top);
     const signalY=value=>bottom-(value-signalMin)/(signalMax-signalMin)*(bottom-signalTop);
     const band=width/(slots-1);
@@ -361,14 +381,19 @@
       ctx.setLineDash([4,5]);ctx.strokeStyle='#8193bf';ctx.beginPath();ctx.moveTo(left,signalY(threshold));ctx.lineTo(right,signalY(threshold));ctx.stroke();ctx.setLineDash([]);
       ctx.textAlign='right';ctx.fillText(format(threshold),left-9,signalY(threshold)+4);
     }
-    function line(values,y,color,dash=[],lineWidth=2){ctx.strokeStyle=color;ctx.lineWidth=lineWidth;ctx.setLineDash(dash);ctx.beginPath();let connected=false;values.forEach((value,i)=>{if(!Number.isFinite(value)){connected=false;return;}if(connected)ctx.lineTo(x(i),y(value));else ctx.moveTo(x(i),y(value));connected=true;});ctx.stroke();ctx.setLineDash([]);}
-    line(forecasts,priceY,'#e8ecf8',[5,4],1.6);line(rows.map(row=>row.Actual_Price),priceY,'#a5b4fc');line(rows.map(row=>row.Custom_Signal),signalY,'#f5b54a');
+    function line(values,y,color,dash=[],lineWidth=2,headValue=null){ctx.strokeStyle=color;ctx.lineWidth=lineWidth;ctx.setLineDash(dash);ctx.beginPath();let connected=false;values.forEach((value,i)=>{if(!Number.isFinite(value)){connected=false;return;}if(connected)ctx.lineTo(x(i),y(value));else ctx.moveTo(x(i),y(value));connected=true;});if(connected&&Number.isFinite(headValue))ctx.lineTo(x(values.length-1+frac),y(headValue));ctx.stroke();ctx.setLineDash([]);}
+    ctx.save();ctx.beginPath();ctx.rect(left,0,width+6,rect.height);ctx.clip();
+    line(forecasts,priceY,'#e8ecf8',[5,4],1.6,head.forecast);line(rows.map(row=>row.Actual_Price),priceY,'#a5b4fc',[],2,head.price);line(rows.map(row=>row.Custom_Signal),signalY,'#f5b54a',[],2,head.signal);
+    ctx.restore();
     const inspected=pointer==null?rows.length-1:Math.min(rows.length-1,Math.round(Math.max(0,Math.min(1,pointer))*(slots-1)));
-    const row=rows[inspected];ctx.setLineDash([3,4]);ctx.strokeStyle='#c9d2ee';ctx.beginPath();ctx.moveTo(x(inspected),top);ctx.lineTo(x(inspected),bottom);ctx.stroke();ctx.setLineDash([]);
-    const forecast=forecasts[inspected];
-    if(Number.isFinite(forecast)){ctx.fillStyle='#e8ecf8';ctx.beginPath();ctx.arc(x(inspected),priceY(forecast),3,0,Math.PI*2);ctx.fill();}
-    ctx.fillStyle='#a5b4fc';ctx.beginPath();ctx.arc(x(inspected),priceY(row.Actual_Price),3,0,Math.PI*2);ctx.fill();
+    // The marker follows the moving head while playing, or the pointer when hovering.
+    const atHead=pointer==null, markerX=atHead?x(rows.length-1+frac):x(inspected);
+    const row=rows[inspected];ctx.setLineDash([3,4]);ctx.strokeStyle='#c9d2ee';ctx.beginPath();ctx.moveTo(markerX,top);ctx.lineTo(markerX,bottom);ctx.stroke();ctx.setLineDash([]);
+    const forecast=forecasts[inspected], markerForecast=atHead&&head.forecast!=null?head.forecast:forecast, markerPrice=atHead&&head.price!=null?head.price:row.Actual_Price;
+    if(Number.isFinite(markerForecast)){ctx.fillStyle='#e8ecf8';ctx.beginPath();ctx.arc(markerX,priceY(markerForecast),3,0,Math.PI*2);ctx.fill();}
+    ctx.fillStyle='#a5b4fc';ctx.beginPath();ctx.arc(markerX,priceY(markerPrice),3,0,Math.PI*2);ctx.fill();
     ctx.fillStyle='#9aa8cc';ctx.textAlign='left';ctx.fillText(rows[0].HourUTC.slice(5,16).replace('T',' '),left,rect.height-6);ctx.textAlign='right';ctx.fillText(rows.at(-1).HourUTC.slice(5,16).replace('T',' ')+' UTC',right,rect.height-6);
+    if(light)return;  // frame-by-frame redraws leave the text summary to the regular updates
     el('signalChartStatus').textContent=`${row.HourUTC.slice(0,16).replace('T',' ')} UTC · price ${format(row.Actual_Price)} DKK/MWh${Number.isFinite(forecast)?` · forecast ${format(forecast)} (error ${format(row.Actual_Price-forecast)})`:''} · signal ${format(row.Custom_Signal)} · ${positionName(row.Position||0)} · last ${rows.length} completed intervals`;
   }
   function render() {
@@ -590,16 +615,51 @@
     const ma=a.reduce((x,y)=>x+y,0)/a.length,mb=b.reduce((x,y)=>x+y,0)/b.length;
     return a.reduce((sum,value,i)=>sum+(value-ma)*(b[i]-mb),0)/(a.length-1)/(sa*sb);
   }
+  // Rolling performance weights, mirrored by rolling_weights in portfolio.py. Each day's weights come from the
+  // runs' stand-alone P&L over the previous `window` days only: profit share (losses count as zero) scaled to
+  // sum to the number of runs, blended with equal weights by `tilt`, capped at `cap` with the excess handed to
+  // the uncapped runs. Days before a full window, and windows where no run made money, use equal weights.
+  function rollingSettings() {
+    return {window:Number(el('pfRollWindow').value)||10, tilt:Math.min(1,Math.max(0,(Number(el('pfRollTilt').value)||0)/100)),
+      cap:Math.min(10,Math.max(1,Number(el('pfRollCap').value)||1))};
+  }
+  function rollingPath(members) {
+    const rows=members[0].intervals, battery=isBattery(members[0]), n=members.length, dayOf=new Array(rows.length), {window,tilt,cap}=rollingSettings();
+    let day=0, previous='';
+    rows.forEach((row,t)=>{
+      if(battery){const date=row.HourUTC.slice(0,10);if(t&&date!==previous)day++;previous=date;dayOf[t]=day;}
+      else{dayOf[t]=day;if(row.Is_Day_End)day++;}
+    });
+    const count=dayOf.length?dayOf.at(-1)+1:0, daily=Array.from({length:count},()=>new Array(n).fill(0));
+    members.forEach((run,i)=>run.intervals.forEach((row,t)=>{daily[dayOf[t]][i]+=row.Cashflow;}));
+    const days=daily.map((_,k)=>{
+      if(k<window)return new Array(n).fill(1);
+      const positive=members.map((_,i)=>{let total=0;for(let j=k-window;j<k;j++)total+=daily[j][i];return Math.max(total,0);});
+      const all=positive.reduce((a,b)=>a+b,0), weights=positive.map(value=>(1-tilt)+tilt*(all>0?value/all*n:1)), capped=new Array(n).fill(false);
+      for(let pass=0;pass<n;pass++){
+        const over=weights.map((value,i)=>value>cap+1e-12&&!capped[i]);
+        if(!over.some(Boolean))break;
+        over.forEach((isOver,i)=>{if(isOver)capped[i]=true;});
+        const free=weights.reduce((total,value,i)=>total+(capped[i]?0:value),0), target=n-cap*capped.filter(Boolean).length;
+        weights.forEach((value,i)=>{weights[i]=capped[i]?cap:free>0?value*Math.max(target,0)/free:value;});
+      }
+      return weights;
+    });
+    return {dayOf,days,window};
+  }
   function portfolioWeights(members) {
     // Volatility is measured on the whole test (in-sample), from hourly P&L.
     const sigmas=members.map(run=>stdev(hourlyPnl(run))), mode=el('pfWeighting').value;
+    if(mode==='rolling')return {sigmas,weights:members.map(()=>1),path:rollingPath(members)};
     if(mode==='manual')return {sigmas,weights:members.map(run=>Math.max(0,Number(portfolio.manual.get(run.runId)??1)||0))};
     if(mode==='equal')return {sigmas,weights:members.map(()=>1)};
     const inverse=sigmas.map(sigma=>sigma>0?1/sigma:0), mean=inverse.reduce((a,b)=>a+b,0)/Math.max(1,inverse.filter(v=>v>0).length);
     return {sigmas,weights:inverse.map(value=>mean>0?value/mean:0)};
   }
-  function simulateBook(members,weights) {
-    const rows=members[0].intervals, n=rows.length, cap=Number(el('pfCap').value)||0, lossLimit=Number(el('pfLoss').value)||0;
+  // `path` (from rollingPath) makes the weights change by day; without it each run keeps its fixed weight.
+  const weightAt=(weights,path)=>path?(t,i)=>path.days[path.dayOf[t]][i]:(t,i)=>weights[i];
+  function simulateBook(members,weights,path) {
+    const rows=members[0].intervals, n=rows.length, cap=Number(el('pfCap').value)||0, lossLimit=Number(el('pfLoss').value)||0, w=weightAt(weights,path);
     const costRate=members[0].settings.prop.transaction_cost_dkk_per_mwh;
     const book={cash:new Array(n),net:new Array(n),cost:new Array(n),standalone:new Array(n),standaloneCost:new Array(n),netTurnover:new Array(n),grossTurnover:new Array(n),capped:0,riskOff:0};
     let previous=0,dayPnl=0;const previousRun=members.map(()=>0);
@@ -607,8 +667,8 @@
       const row=rows[t], dayEnd=Boolean(row.Is_Day_End);
       let net=0,standalone=0,standaloneCost=0,grossTurnover=0;
       members.forEach((run,i)=>{
-        const r=run.intervals[t], exposure=weights[i]*(r.Position_MWh||0);
-        net+=exposure; standalone+=weights[i]*r.Cashflow; standaloneCost+=weights[i]*(r.Transaction_Cost||0);
+        const r=run.intervals[t], exposure=w(t,i)*(r.Position_MWh||0);
+        net+=exposure; standalone+=w(t,i)*r.Cashflow; standaloneCost+=w(t,i)*(r.Transaction_Cost||0);
         grossTurnover+=Math.abs(exposure-previousRun[i])+(dayEnd?Math.abs(exposure):0); previousRun[i]=dayEnd?0:exposure;
       });
       if(cap>0&&Math.abs(net)>cap){net=Math.sign(net)*cap;book.capped++;}
@@ -624,8 +684,8 @@
   }
   // One shared battery: the runs' weighted MW requests are netted each interval (charge negative, discharge
   // positive) and the battery executes the net within its power and state-of-charge limits, like the run itself.
-  function simulateBatteryBook(members,weights) {
-    const rows=members[0].intervals, n=rows.length, cap=Number(el('pfCap').value)||0, lossLimit=Number(el('pfLoss').value)||0;
+  function simulateBatteryBook(members,weights,path) {
+    const rows=members[0].intervals, n=rows.length, cap=Number(el('pfCap').value)||0, lossLimit=Number(el('pfLoss').value)||0, w=weightAt(weights,path);
     const cfg=members[0].settings.battery, step=0.25, fees=s=>[(s.fee_per_mwh||0)+s.charge_fee_per_mwh,(s.fee_per_mwh||0)+s.discharge_fee_per_mwh];
     const [chargeFee,dischargeFee]=fees(cfg);
     const book={cash:new Array(n),net:new Array(n),cost:new Array(n),standalone:new Array(n),standaloneCost:new Array(n),netTurnover:new Array(n),grossTurnover:new Array(n),soc:new Array(n),capped:0,riskOff:0};
@@ -633,8 +693,8 @@
     for(let t=0;t<n;t++){
       const row=rows[t];let request=0,standalone=0,standaloneCost=0,grossTurnover=0;
       members.forEach((run,i)=>{
-        const r=run.intervals[t],mw=weights[i]*(r.Dispatch_MW||0),[cf,df]=fees(run.settings.battery);
-        request+=mw;standalone+=weights[i]*r.Cashflow;standaloneCost+=Math.abs(mw)*step*(mw<0?cf:df);grossTurnover+=Math.abs(mw)*step;
+        const r=run.intervals[t],mw=w(t,i)*(r.Dispatch_MW||0),[cf,df]=fees(run.settings.battery);
+        request+=mw;standalone+=w(t,i)*r.Cashflow;standaloneCost+=Math.abs(mw)*step*(mw<0?cf:df);grossTurnover+=Math.abs(mw)*step;
       });
       let power=Math.min(Math.abs(request),cfg.power_mw);
       if(cap>0&&Math.abs(request)>cap){power=Math.min(power,cap);book.capped++;}
@@ -694,28 +754,34 @@
         tr.append(name,includeCell,weightCell,sigma,pnl);body.append(tr);
       });
     }
-    const members=runs.filter(run=>portfolio.include.get(run.runId)!==false);
-    const {sigmas,weights}=members.length?portfolioWeights(members):{sigmas:[],weights:[]};
+    const members=runs.filter(run=>portfolio.include.get(run.runId)!==false), rolling=mode==='rolling';
+    document.querySelectorAll('.pf-rolling').forEach(control=>{control.hidden=!rolling;});
+    el('pfWeightChart').hidden=!rolling; el('pfLegendEqual').hidden=!rolling;
+    el('pfWeightHead').textContent=rolling?'Weight × · now':'Weight ×';
+    const {sigmas,weights,path}=members.length?portfolioWeights(members):{sigmas:[],weights:[]};
     const windowKey=el('chartWindow').value, span=spanOf(windowKey), windowName=chartWindows.find(([k])=>k===windowKey)[1];
     const to=replayCursor, from=Number.isFinite(span)?Math.max(0,to-span):0;
     for(const tr of el('pfWeightRows').children){
       const run=runs.find(item=>item.runId===tr.dataset.run), index=members.indexOf(run), cells=tr.children;
-      if(mode!=='manual')cells[2].firstChild.value=index>=0?weights[index].toFixed(2):'0';
+      const shown=index<0?0:path?path.days[path.dayOf[Math.max(0,Math.min(run.intervals.length,to)-1)]][index]:weights[index];
+      if(mode!=='manual')cells[2].firstChild.value=shown.toFixed(2);
       cells[3].textContent=compact(stdev(hourlyPnl(run)));
       const pnl=sum(run.intervals.map(row=>row.Cashflow),from,to);cells[4].textContent=format(pnl);cells[4].className=pnl>0?'positive':pnl<0?'negative':'';
     }
     if(!members.length||!weights.some(w=>w>0)){
       for(const id of ['pfPnl','pfStandalone','pfSaved','pfDrawdown','pfExposure','pfDiversification'])el(id).textContent='—';
-      el('pfNotes').textContent='Include at least one run with a weight above 0.';el('pfCorr').replaceChildren();drawPortfolio(null,0,0);return;
+      el('pfNotes').textContent='Include at least one run with a weight above 0.';el('pfCorr').replaceChildren();drawPortfolio(null,0,0);drawWeights(null);return;
     }
-    scheduleBookRobustness(members,weights);
-    const book=battery?simulateBatteryBook(members,weights):simulateBook(members,weights);
+    scheduleBookRobustness(members,weights,rolling);
+    const simulate=battery?simulateBatteryBook:simulateBook, book=simulate(members,weights,path);
+    // With rolling weights the equal-weight book is kept alongside as the comparison.
+    if(rolling)book.equal=simulate(members,weights).cash;
     const pnl=sum(book.cash,from,to), standalone=sum(book.standalone,from,to), saved=sum(book.standaloneCost,from,to)-sum(book.cost,from,to);
     let cumulative=0,peak=0,drawdown=0,exposureSum=0,exposureMax=0;
     for(let t=from;t<to;t++){cumulative+=book.cash[t];peak=Math.max(peak,cumulative);drawdown=Math.max(drawdown,peak-cumulative);const absolute=Math.abs(book.net[t]);exposureSum+=absolute;exposureMax=Math.max(exposureMax,absolute);}
     const label=windowName[0].toUpperCase()+windowName.slice(1);
     el('pfPnl').textContent=format(pnl);el('pfPnl').className=pnl>0?'positive':pnl<0?'negative':'';
-    el('pfPnlNote').textContent=`${label}, netted, after costs`;
+    el('pfPnlNote').textContent=`${label}, netted, after costs${rolling?` · ${format(sum(book.equal,from,to))} with equal weights`:''}`;
     el('pfStandalone').textContent=format(standalone);el('pfStandalone').className=standalone>0?'positive':standalone<0?'negative':'';
     el('pfSaved').textContent=format(saved);
     el('pfTurnover').textContent=`${format(sum(book.netTurnover,from,to))} MWh ${battery?'dispatched':'traded'} vs ${format(sum(book.grossTurnover,from,to))} separately${battery?' (netting plus energy one battery could not deliver)':''}`;
@@ -723,8 +789,11 @@
     el('pfExposure').textContent=to>from?`${compact(exposureSum/(to-from))} / ${compact(exposureMax)} ${battery?'MW':'MWh'}`:'—';
     el('pfLimits').textContent=`Cap hit ${book.capped}× · loss limit ${battery?'idle':'flat'} ${book.riskOff}× (whole test)`;
     // Diversification and correlation use hourly P&L over the whole test.
-    const hourly=members.map(hourlyPnl), combined=hourly[0].map((_,h)=>hourly.reduce((total,series,i)=>total+weights[i]*series[h],0));
-    const bookSigma=stdev(combined), weightedSigma=sigmas.reduce((total,sigma,i)=>total+weights[i]*sigma,0);
+    const hourly=members.map(hourlyPnl), w=weightAt(weights,path), length=members[0].intervals.length;
+    const average=members.map((_,i)=>{let total=0;for(let t=0;t<length;t++)total+=w(t,i);return total/length;});
+    const hours=new Map();
+    members.forEach((run,i)=>run.intervals.forEach((row,t)=>{const hour=row.HourUTC.slice(0,13);hours.set(hour,(hours.get(hour)||0)+w(t,i)*row.Cashflow);}));
+    const combined=[...hours.values()], bookSigma=stdev(combined), weightedSigma=sigmas.reduce((total,sigma,i)=>total+average[i]*sigma,0);
     el('pfDiversification').textContent=members.length>1&&bookSigma>0?`${format(weightedSigma/bookSigma)}×`:'—';
     const table=el('pfCorr');table.replaceChildren();
     const head=document.createElement('tr');head.append(document.createElement('th'));
@@ -737,7 +806,8 @@
       tbody.append(tr);
     });
     table.append(thead,tbody);
-    const inSample=`Inverse-volatility weights, σ, correlation and the diversification ratio use the whole test (in-sample) on ${combined.length} hourly observations, so treat them as illustrative.`;
+    const inSample=`Inverse-volatility weights, σ, correlation and the diversification ratio use the whole test (in-sample) on ${combined.length} hourly observations, so treat them as illustrative.`
+      +(rolling?` Rolling performance sets each day’s weights from the previous ${path.window} days only: a run’s share of the profit (losses count as zero), tilted ${Math.round(rollingSettings().tilt*100)}% of the way from equal weights towards that share and capped at ${format(rollingSettings().cap)}×; the first ${path.window} days, and windows where no run made money, use equal weights. It adds to recent winners and cuts recent losers, which helps while winners persist and hurts when leadership rotates, so compare it with the equal-weight book.`:'');
     if(battery){
       const spec=members[0].settings.battery, batteries=new Set(members.map(run=>JSON.stringify(run.settings.battery)));
       el('pfNotes').textContent=`Weights scale each run’s MW requests. The book has one battery (${format(spec.capacity_mwh)} MWh, ${format(spec.power_mw)} MW), so when the weighted requests add up to more than its power or state of charge allows, it delivers less than the runs did on their own: the sum of stand-alone runs assumes one battery per run. ${inSample}${batteries.size>1?' Runs use different battery settings; the book uses the first included run’s.':''} Negative correlation (green) diversifies; positive (blue) concentrates.`;
@@ -746,6 +816,31 @@
       el('pfNotes').textContent=`Weights scale each run’s MWh. ${inSample}${costs.size>1?' Runs use different transaction costs; the book uses the first included run’s rate.':''} Negative correlation (green) diversifies; positive (blue) concentrates.`;
     }
     drawPortfolio(book,from,to);
+    drawWeights(rolling?path:null,members,from,to);
+  }
+  // Daily weights as step lines, one per run in its run colour, labelled at the right edge.
+  function drawWeights(path,members,from,to) {
+    const canvas=el('pfWeightCanvas'),rect=canvas.getBoundingClientRect(),scale=window.devicePixelRatio||1;
+    if(!rect.width)return;
+    canvas.width=Math.round(rect.width*scale);canvas.height=Math.round(rect.height*scale);
+    const ctx=canvas.getContext('2d');ctx.scale(scale,scale);ctx.font=chartFont;
+    if(!path||!to)return;
+    const n=path.dayOf.length,left=4,right=rect.width-70,top=10,bottom=rect.height-8,x=i=>left+i/(n-1)*(right-left);
+    const max=Math.max(1.2,...path.days.flat())*1.08,y=value=>bottom-value/max*(bottom-top);
+    ctx.fillStyle='rgba(83,58,253,.14)';ctx.fillRect(x(from),top,Math.max(1,x(Math.max(from,to-1))-x(from)),bottom-top);
+    ctx.setLineDash([3,4]);ctx.strokeStyle='#33416f';ctx.beginPath();ctx.moveTo(left,y(1));ctx.lineTo(right,y(1));ctx.stroke();ctx.setLineDash([]);
+    const ends=[];
+    members.forEach((run,i)=>{
+      ctx.strokeStyle=runColors[runs.indexOf(run)];ctx.lineWidth=2;ctx.beginPath();let last=0;
+      for(let t=0;t<to;t++){const value=y(path.days[path.dayOf[t]][i]);if(t){ctx.lineTo(x(t),last);ctx.lineTo(x(t),value);}else ctx.moveTo(x(t),value);last=value;}
+      ctx.stroke();ends.push({run,value:path.days[path.dayOf[to-1]][i],y:last});
+    });
+    // Direct labels at the replay time, nudged apart so they stay readable.
+    ends.sort((a,b)=>a.y-b.y);
+    ends.forEach((end,k)=>{if(k&&end.y-ends[k-1].y<11)end.y=ends[k-1].y+11;});
+    const shift=Math.max(0,(ends.at(-1)?.y||0)-bottom);
+    ctx.textAlign='left';
+    ends.forEach(end=>{ctx.fillStyle=runColors[runs.indexOf(end.run)];ctx.fillRect(right+6,end.y-shift-5,6,6);ctx.fillStyle='#e8ecf8';ctx.fillText(`#${end.run.runId} ${format(end.value)}×`,right+16,end.y-shift+2);});
   }
   // ---- Book slots: five starter strategies when the book comes into view, each replaceable from its row ----
   const starterBook=['Cheapest 20% / priciest 20%','Forecast momentum','Night long, evening short','Daily z-score reversion','Power vs gas'];
@@ -795,19 +890,21 @@
   // ---- Book robustness: recomputed on the server whenever the book's runs, weights, cap or loss limit change ----
   let bookTimer=null,bookSerial=0,bookKey='',bookState=null;
   const pValueText=p=>p<0.001?'< 0.001':p.toFixed(3), pValueClass=p=>p<0.05?'p-strong':p<0.10?'p-weak':'p-none';
-  function scheduleBookRobustness(members,weights) {
-    const cap=Number(el('pfCap').value)||0,loss=Number(el('pfLoss').value)||0;
+  function scheduleBookRobustness(members,weights,rolling=false) {
+    const cap=Number(el('pfCap').value)||0,loss=Number(el('pfLoss').value)||0,roll=rolling?rollingSettings():null;
     const included=members.map((run,i)=>[run,weights[i]]).filter(([,weight])=>weight>0);
-    const key=JSON.stringify([included.map(([run,weight])=>[run.runId,Number(weight.toFixed(4))]),cap,loss]);
+    const key=JSON.stringify([included.map(([run,weight])=>[run.runId,Number(weight.toFixed(4))]),cap,loss,roll]);
     if(key===bookKey)return;
     bookKey=key;clearTimeout(bookTimer);const serial=++bookSerial;
-    const names=included.map(([run,weight])=>`#${run.runId} ${run.name} ×${weight.toFixed(2)}`);
+    const names=included.map(([run,weight])=>`#${run.runId} ${run.name}${roll?'':` ×${weight.toFixed(2)}`}`);
+    if(roll)names.push(`rolling weights (${roll.window} days, ${Math.round(roll.tilt*100)}% tilt, max ${roll.cap}×)`);
+    const weighting=roll?{weighting:'rolling',rolling_window_days:roll.window,rolling_tilt:roll.tilt,rolling_cap:roll.cap}:{};
     if(included.length<2){bookState={status:'idle'};renderBookRobustness();return;}
     bookState={status:'loading',names};renderBookRobustness();
     bookTimer=setTimeout(async()=>{
       try{
         const response=await fetch('/api/portfolio/robustness',{method:'POST',headers:{'Content-Type':'application/json'},signal:AbortSignal.timeout(90000),
-          body:JSON.stringify({runs:included.map(([run])=>run.request),weights:included.map(([,weight])=>weight),cap_mwh:cap,daily_loss_limit_dkk:loss})});
+          body:JSON.stringify({runs:included.map(([run])=>run.request),weights:included.map(([,weight])=>weight),cap_mwh:cap,daily_loss_limit_dkk:loss,...weighting})});
         const data=await response.json();
         if(!response.ok)throw new Error(typeof data.detail==='string'?data.detail:`Book robustness failed (${response.status}).`);
         if(serial===bookSerial){bookState={status:'ready',data,names};renderBookRobustness();}
@@ -819,7 +916,7 @@
     periodsBody.replaceChildren();sigBody.replaceChildren();el('pfRobustVerdict').textContent='';
     const status=el('pfRobustStatus');
     if(!state||state.status==='idle'){status.textContent='Include at least two runs with a weight above 0 to test the book.';return;}
-    const tested=`Testing the book: ${state.names.join(' + ')}`;
+    const tested=`Testing the book: ${state.names.join(' + ').replace(' + rolling weights',' · rolling weights')}`;
     if(state.status==='loading'){status.textContent=`${tested} · updating…`;return;}
     if(state.status==='error'){status.textContent=`${tested} · unavailable: ${state.message}`;return;}
     const {periods,significance:sig}=state.data;
@@ -842,7 +939,8 @@
     el('pfRobustVerdict').textContent=(both?`The book is profitable in both periods (${format(early.pnl_per_day)} and ${format(late.pnl_per_day)} DKK/day). `
       :`The book is not profitable in both periods (${format(early.pnl_per_day)} and ${format(late.pnl_per_day)} DKK/day). `)
       +(sig&&!sig.error?(sig.p_daily<0.05?'Its mean daily P&L is significant at 5%':'Its mean daily P&L is not significant at 5%')
-      +(!sig.day_shuffle?' (permutation tests run for Prop proxy only).':sig.day_shuffle.p<0.05?', and the day-specific forecasts add value beyond the daily price shape.':'; shuffling days keeps most of it, so the edge is mainly the daily price shape.'):'');
+      +(!sig.day_shuffle?' (permutation tests run for Prop proxy only).':sig.day_shuffle.p<0.05?', and the day-specific forecasts add value beyond the daily price shape.':'; shuffling days keeps most of it, so the edge is mainly the daily price shape.'):'')
+      +(late.equal_weight_cashflow==null?'':` With equal weights the same book made ${format(early.equal_weight_cashflow)} DKK in the earlier period and ${format(late.equal_weight_cashflow)} in the test period, against ${format(early.total_cashflow)} and ${format(late.total_cashflow)} with rolling weights.`);
   }
 
   function drawPortfolio(book,from,to) {
@@ -855,19 +953,20 @@
     const x=i=>left+i/(n-1)*width;
     const bookCum=[],sumCum=[];let a=0,b=0;
     for(let t=0;t<to;t++){a+=book.cash[t];b+=book.standalone[t];bookCum.push(a);sumCum.push(b);}
-    const values=[0,...bookCum,...sumCum],lo=Math.min(...values),hi=Math.max(...values),pad=Math.max((hi-lo)*.1,1),min=lo-pad,max=hi+pad;
+    const equalCum=[];if(book.equal){let c=0;for(let t=0;t<to;t++){c+=book.equal[t];equalCum.push(c);}}
+    const values=[0,...bookCum,...sumCum,...equalCum],lo=Math.min(...values),hi=Math.max(...values),pad=Math.max((hi-lo)*.1,1),min=lo-pad,max=hi+pad;
     const y=value=>lineBottom-(value-min)/(max-min)*(lineBottom-top);
     // Shade the chart window the results refer to.
     ctx.fillStyle='rgba(83,58,253,.14)';ctx.fillRect(x(from),top,Math.max(1,x(Math.max(from,to-1))-x(from)),bottom-top);
     ctx.setLineDash([3,4]);ctx.strokeStyle='#33416f';ctx.beginPath();ctx.moveTo(left,y(0));ctx.lineTo(right,y(0));ctx.stroke();ctx.setLineDash([]);
     const path=(series,color,dash)=>{ctx.strokeStyle=color;ctx.lineWidth=dash.length?1.5:2.2;ctx.setLineDash(dash);ctx.beginPath();series.forEach((value,i)=>i?ctx.lineTo(x(i),y(value)):ctx.moveTo(x(i),y(value)));ctx.stroke();ctx.setLineDash([]);};
-    path(sumCum,'#a5b4fc',[5,4]);path(bookCum,'#4fe0b0',[]);
+    path(sumCum,'#a5b4fc',[5,4]);if(equalCum.length)path(equalCum,'#e8ecf8',[2,3]);path(bookCum,'#4fe0b0',[]);
     const maxNet=Math.max(1,...book.net.map(Math.abs)),mid=(barTop+bottom)/2,barWidth=Math.max(1,width/n);
     for(let t=0;t<to;t++){const h=book.net[t]/maxNet*(bottom-barTop)/2;if(!h)continue;ctx.fillStyle=h>0?'rgba(79,224,176,.55)':'rgba(255,143,171,.55)';ctx.fillRect(x(t),h>0?mid-h:mid,barWidth,Math.abs(h));}
     ctx.fillStyle='#9aa8cc';ctx.textAlign='left';
     ctx.fillText(compact(hi),right+8,top+8);ctx.fillText(compact(lo),right+8,lineBottom);ctx.fillText(`±${compact(maxNet)} ${book.soc?'MW':'MWh'}`,right+8,mid+4);
   }
-  ['pfWeighting','pfCap','pfLoss'].forEach(id=>el(id).addEventListener('input',()=>{if(result)renderPortfolio();}));
+  ['pfWeighting','pfCap','pfLoss','pfRollWindow','pfRollTilt','pfRollCap'].forEach(id=>el(id).addEventListener('input',()=>{if(result)renderPortfolio();}));
   // Enter in a portfolio input must not submit the backtest form.
   el('portfolio').addEventListener('keydown',event=>{if(event.key==='Enter'&&event.target.matches('input'))event.preventDefault();});
   el('labForm').addEventListener('submit',async event=>{
@@ -937,10 +1036,22 @@
   }));
   el('replayPlay').addEventListener('click',()=>{
     if(!result)return;
-    if(replayTimer){pauseReplay();return;}
+    if(replayTimer){pauseReplay();render();return;}
     if(replayCursor===result.intervals.length){replayCursor=0;render();}
     el('replayPlay').textContent='Pause';
-    replayTimer=setInterval(()=>{replayCursor=Math.min(result.intervals.length,replayCursor+Number(el('replaySpeed').value));render();if(replayCursor===result.intervals.length)pauseReplay();},1000);
+    // Advance continuously: the chart is redrawn every frame, the heavier result panels a few times a second.
+    replayFloat=replayCursor; let last=performance.now();
+    const frame=now=>{
+      if(!result){pauseReplay();return;}
+      const total=result.intervals.length;
+      replayFloat=Math.min(total,replayFloat+Number(el('replaySpeed').value)*Math.min(.1,(now-last)/1000)); last=now;
+      const cursor=Math.floor(replayFloat), done=replayFloat>=total;
+      if(done){pauseReplay();replayCursor=total;render();return;}
+      if(cursor!==replayCursor&&now-lastHeavyRender>=125){replayCursor=cursor;lastHeavyRender=now;render();}
+      else drawSignal(null,true);
+      replayTimer=requestAnimationFrame(frame);
+    };
+    replayTimer=requestAnimationFrame(frame);
   });
   el('replayStep').addEventListener('click',()=>{if(!result)return;pauseReplay();replayCursor=Math.min(result.intervals.length,replayCursor+1);render();});
   el('replayReset').addEventListener('click',()=>{if(!result)return;pauseReplay();replayCursor=0;render();});
