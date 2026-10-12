@@ -1053,6 +1053,20 @@
     };
     replayTimer=requestAnimationFrame(frame);
   });
+  // The replay position bar only appears while the pointer or keyboard focus is on the graph or its controls
+  // (its space stays reserved, so nothing moves). After a touch it stays for a few seconds.
+  let scrubTimer=null, scrubHover=false;
+  const scrubShow=()=>{clearTimeout(scrubTimer);el('replayCursor').classList.add('is-shown');};
+  const scrubHide=delay=>{clearTimeout(scrubTimer);scrubTimer=setTimeout(()=>{
+    if(!scrubHover&&document.activeElement!==el('replayCursor'))el('replayCursor').classList.remove('is-shown');},delay);};
+  document.querySelectorAll('#replayWorkspace .sl-chart, #replayWorkspace .sl-legend, #replayWorkspace .replay-controls').forEach(zone=>{
+    zone.addEventListener('pointerenter',event=>{scrubHover=event.pointerType==='mouse';scrubShow();});
+    zone.addEventListener('pointerleave',event=>{scrubHover=false;scrubHide(event.pointerType==='mouse'?600:4000);});
+    zone.addEventListener('pointerdown',()=>{scrubShow();if(!scrubHover)scrubHide(4000);});
+    zone.addEventListener('focusin',scrubShow);
+    zone.addEventListener('focusout',()=>scrubHide(600));
+  });
+  el('replayCursor').addEventListener('input',()=>{scrubShow();if(!scrubHover)scrubHide(4000);});
   el('replayStep').addEventListener('click',()=>{if(!result)return;pauseReplay();replayCursor=Math.min(result.intervals.length,replayCursor+1);render();});
   el('replayReset').addEventListener('click',()=>{if(!result)return;pauseReplay();replayCursor=0;render();});
   el('replayEnd').addEventListener('click',()=>{if(!result)return;pauseReplay();replayCursor=result.intervals.length;render();});

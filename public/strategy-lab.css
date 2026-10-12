@@ -78,7 +78,8 @@
 .sl-speed{display:inline-flex;align-items:center;gap:8px;margin-left:auto;color:var(--p-muted);font-size:12px}
 .sl-speed-rate{margin-left:0}
 .sl-speed select{min-height:36px;padding:4px 8px;border-radius:4px;border:1px solid var(--p-line);background:var(--p-bg);color:var(--p-text);font:inherit}
-#replayCursor{flex-basis:100%;width:100%;margin:10px 0 0;accent-color:var(--accent)}
+#replayCursor{flex-basis:100%;width:100%;margin:10px 0 0;accent-color:var(--accent);opacity:0;pointer-events:none;transition:opacity .2s}
+#replayCursor.is-shown{opacity:1;pointer-events:auto}
 .sl-caption{margin:6px 32px 0;min-height:20px;color:var(--p-muted);font:12px/1.5 var(--mono);overflow-wrap:anywhere}
 
 /* Code editor */
