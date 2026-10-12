@@ -1,5 +1,5 @@
 // Introduction film: a 64-second animated walkthrough drawn on a canvas, from data gathering to trading.
-// Every frame is a pure function of the time, so play, pause, seek and chapters all share one renderer.
+// Every frame is a pure function of the time, so play, pause and the chapter buttons all share one renderer.
 (() => {
   'use strict';
   const root = document.getElementById('introFilm');
@@ -114,14 +114,19 @@
     return [-.12, -.045, .04, .115].map((r, q) => b + slope * r + .018 * Math.sin(h * 7.3 + q * 2.1));
   });
   function model(t) {
-    const x0 = W * .07, x1 = W * .93, y0 = H * .36, y1 = H * .76, n = forecast.length;
+    const x0 = W * .07, x1 = W * .93, y0 = H * (narrow ? .47 : .43), y1 = H * .76, n = forecast.length;
     const x = q => x0 + (x1 - x0) * q / n, y = v => y1 - v * (y1 - y0);
     for (let g = 0; g < 3; g++) { alpha(.6); ctx.strokeStyle = C.line; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(x0, y0 + (y1 - y0) * g / 2); ctx.lineTo(x1, y0 + (y1 - y0) * g / 2); ctx.stroke(); }
-    const legend = [[.5, C.text, [6, 5], narrow ? 'Hourly baseline · 47,066 hours' : 'Hourly baseline · an ensemble trained on 47,066 hours of history'],
-      [3.4, C.price, null, narrow ? 'Residual · the 15-min correction' : 'Residual · a second ensemble learns the 15-minute correction'],
+    // The point of the chapter, stated first: learn on the hourly market, adapt to the 15-minute market.
+    const learn = narrow ? 'Learn patterns on the hourly market.' : 'Learn the patterns on the hourly market.', adapt = narrow ? 'Adapt them to 15 minutes.' : 'Adapt them to the 15-minute market.';
+    text(learn, x0, H * .2, {size: 19, weight: 600, a: prog(t, .3, 1)});
+    ctx.font = `600 ${F(19)}px ${SANS}`;
+    text(adapt, narrow ? x0 : x0 + ctx.measureText(learn).width + F(19) * .5, narrow ? H * .2 + F(19) + 5 : H * .2, {size: 19, weight: 600, color: C.price, a: prog(t, 3.2, 3.9)});
+    const legend = [[.5, C.text, [6, 5], narrow ? 'Hourly baseline · learnt on hourly data' : 'Hourly baseline · patterns learnt from 47,066 hours of the hourly market'],
+      [3.4, C.price, null, narrow ? 'Residual · adapted to 15 minutes' : 'Residual · those patterns adapted to the 15-minute market'],
       [6.2, C.price, [], narrow ? '15-minute forecast' : '15-minute forecast · baseline plus residual']];
     legend.forEach(([start, color, dash, label], i) => {
-      const a = prog(t, start, start + .7), ly = H * .2 + i * (F(13) + 9);
+      const a = prog(t, start, start + .7), ly = H * (narrow ? .32 : .285) + i * (F(13) + (narrow ? 7 : 9));
       if (dash) line([[x0, ly - 4], [x0 + 26, ly - 4]], color, {width: 2, dash, a}); else fillBox(x0 + 8, ly - 11, 10, 13, color, a * .35, 2);
       text(label, x0 + 36, ly, {size: 13, a});
     });
@@ -170,12 +175,12 @@
     node(left, yA, bw, bh, narrow ? '15-min data' : '15-minute data', '14,108 quarter-hours', C.direct, prog(t, .2, .8));
     arrow(left + bw + 6, right - last - 6, yA + bh / 2, C.direct, t, .8);
     node(right - last, yA, last, bh, narrow ? '15-min model' : '15-minute model', '15-minute data only', C.direct, prog(t, 1.2, 1.8));
-    text('TRANSFER LEARNING', left, yB - 8, {size: 10.5, color: C.muted, mono: true, a: prog(t, 2, 2.5)});
+    text(narrow ? 'TRANSFER LEARNING' : 'TRANSFER LEARNING · LEARN ON HOURLY, ADAPT TO 15-MINUTE', left, yB - 8, {size: 10.5, color: C.muted, mono: true, a: prog(t, 2, 2.5)});
     node(left, yB, bw, bh, 'Hourly data', '47,066 hours', C.transfer, prog(t, 2, 2.6));
     arrow(left + bw + 6, mid - 6, yB + bh / 2, C.transfer, t, 2.6);
-    node(mid, yB, bw, bh, narrow ? 'Hourly model' : 'Hourly source model', 'trained first', C.transfer, prog(t, 3, 3.6));
-    arrow(mid + bw + 6, right - last - 6, yB + bh / 2, C.transfer, t, 3.6, 'transfer');
-    node(right - last, yB, last, bh, narrow ? '15-min model' : '15-minute model', 'builds on the hourly model', C.transfer, prog(t, 4, 4.6));
+    node(mid, yB, bw, bh, narrow ? 'Hourly model' : 'Hourly source model', 'learns hourly patterns', C.transfer, prog(t, 3, 3.6));
+    arrow(mid + bw + 6, right - last - 6, yB + bh / 2, C.transfer, t, 3.6, 'patterns');
+    node(right - last, yB, last, bh, narrow ? '15-min model' : '15-minute model', 'adapts them to 15-minute data', C.transfer, prog(t, 4, 4.6));
 
     const cols = narrow ? 2 : 4, gap = W * .015, cw = (right - left - gap * (cols - 1)) / cols, cy = H * (narrow ? .56 : .62), ch = H * (narrow ? .135 : .2);
     const place = i => [left + (i % cols) * (cw + gap), cy + Math.floor(i / cols) * (ch + gap)];
@@ -194,7 +199,7 @@
     const [nx, ny] = place(2), bracket = prog(t, 6.6, 7.2), lineY = narrow ? ny + ch + 7 : ny - 8, width = cw * 2 + gap;
     line([[nx, lineY + (narrow ? -4 : 4)], [nx, lineY], [nx + width, lineY], [nx + width, lineY + (narrow ? -4 : 4)]], C.muted, {width: 1, a: bracket * .8});
     text('neural networks', nx + width / 2, narrow ? lineY + F(10.5) + 4 : lineY - 6, {size: 10.5, color: C.muted, align: 'center', mono: true, a: bracket});
-    text(narrow ? 'All four were trained both ways.' : 'All four families were trained both ways, including the neural networks.',
+    text(narrow ? 'Hourly patterns, adapted to 15 minutes.' : 'Hourly patterns, adapted to 15 minutes: all four families, neural networks included.',
       left, H * (narrow ? .965 : .935), {size: 13.5, weight: 600, a: prog(t, 7.3, 8)});
   }
 
@@ -262,8 +267,8 @@
   const SCENES = [
     {title: 'Gather', dur: 9, draw: gather, caption: 'Gather. More than five years of hourly DK1 market data and five months at 15-minute resolution: load, wind and solar forecasts from ENTSO-E, prices and system data from Energinet, plus weather and gas prices.'},
     {title: 'Clean', dur: 9, draw: clean, caption: 'Clean. Every series goes onto one UTC clock and coverage is checked; a 72-hour hole in the wind and solar forecasts is filled and flagged. Each row then gets only values known before the auction, lagged by one, two and seven days: 76 features.'},
-    {title: 'Model', dur: 11, draw: model, caption: 'Model. An ensemble trained on the long hourly history gives every quarter-hour a baseline. A second ensemble learns the 15-minute correction on top of it: transfer learning plus residual learning. A direct 15-minute model is kept as a benchmark.'},
-    {title: 'Train', dur: 10, draw: train, caption: 'Train. Four model families were each trained two ways: directly on the five months of 15-minute data, and with transfer learning, where a model trained first on the long hourly history passes what it learned to the 15-minute model. That covers the tree ensembles and SARIMAX as well as the neural networks, the LSTM and the CNN-LSTM.'},
+    {title: 'Model', dur: 11, draw: model, caption: 'Model. The patterns are learnt where the data is: an ensemble trained on more than five years of the hourly market gives every quarter-hour a baseline. A second ensemble then adapts those patterns to the 15-minute market by learning the correction on top. That is transfer learning plus residual learning; a direct 15-minute model is kept as a benchmark.'},
+    {title: 'Train', dur: 10, draw: train, caption: 'Train. Four model families were each trained two ways: directly on the five months of 15-minute data, and with transfer learning, where the model first learns the market’s patterns from the long hourly history and is then adapted to the 15-minute market. That covers the tree ensembles and SARIMAX as well as the neural networks, the LSTM and the CNN-LSTM.'},
     {title: 'Validate', dur: 11, draw: validate, caption: 'Validate. Walk-forward: retrain on everything earlier, forecast the next 14 days, eight times. A model is only used if it beat the baseline on earlier data, and the hourly baseline was chosen in all eight blocks. Stacking scored best, but only in hindsight.'},
     {title: 'Trade', dur: 10, draw: trade, caption: 'Trade. A rule turns the forecast into long, short or flat. Positions are sized, costed and settled, then checked with walk-forward tuning, significance tests and a portfolio view.'},
     {title: '', dur: 4, draw: outro, caption: 'Now test your own rule in the Strategy Lab below.'},
@@ -276,15 +281,12 @@
   // ---- Player ----
   let time = 0, playing = false, lastFrame = 0, frame = 0, userPaused = false, shownScene = null, poster = false;
   const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
-  const clock = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
   function render() {
     const scene = sceneAt(Math.min(time, TOTAL - .001)), local = time - scene.start;
     ctx.setTransform(canvas.width / W, 0, 0, canvas.height / H, 0, 0); ctx.globalAlpha = 1;
     const sky = ctx.createLinearGradient(0, 0, W, H); sky.addColorStop(0, '#101c44'); sky.addColorStop(1, C.bg); ctx.fillStyle = sky; ctx.fillRect(0, 0, W, H);
     fade = clamp(local / .45) * (scene === SCENES.at(-1) ? 1 : clamp((scene.dur - local) / .35));
     scene.draw(local); ctx.globalAlpha = 1;
-    el('filmSeek').value = time; el('filmSeek').style.setProperty('--played', `${time / TOTAL * 100}%`);
-    el('filmTime').textContent = `${clock(time)} / ${clock(TOTAL)}`;
     if (scene !== shownScene) {
       shownScene = scene; const index = chapters.indexOf(scene);
       el('filmChip').textContent = index >= 0 ? `0${index + 1} / 0${chapters.length} · ${scene.title}` : 'Next · Strategy Lab';
@@ -323,8 +325,6 @@
     return button;
   }));
   el('filmTranscript').replaceChildren(...chapters.map(scene => { const item = document.createElement('li'); item.textContent = scene.caption; return item; }));
-  el('filmSeek').max = String(TOTAL);
-  el('filmSeek').addEventListener('input', event => { userPaused = true; seek(Number(event.target.value), false); });
   el('filmPlay').addEventListener('click', toggle); el('filmBigPlay').addEventListener('click', toggle); canvas.addEventListener('click', toggle);
   el('filmReplay').addEventListener('click', () => { userPaused = false; seek(0, true); });
   new ResizeObserver(resize).observe(stage);

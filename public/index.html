@@ -53,12 +53,10 @@
             <button type="button" class="film-bigplay" id="filmBigPlay" aria-label="Play the introduction">&#9654;</button>
             <div class="film-end" id="filmEnd" hidden><a class="btn btn-primary" href="#lab">Open the Strategy Lab <span class="chev" aria-hidden="true">&#8250;</span></a><button type="button" class="film-ghost" id="filmReplay">Replay</button></div>
           </div>
-          <div class="film-bar">
+          <div class="film-nav">
             <button type="button" class="film-play" id="filmPlay" aria-label="Play the introduction">&#9654;</button>
-            <input type="range" id="filmSeek" min="0" max="64" step="0.1" value="0" aria-label="Position in the introduction, in seconds">
-            <span class="film-time" id="filmTime">0:00 / 1:04</span>
+            <div class="film-chapters" id="filmChapters" aria-label="Chapters"></div>
           </div>
-          <div class="film-chapters" id="filmChapters" aria-label="Chapters"></div>
           <figcaption class="film-caption" id="filmCaption"></figcaption>
           <details class="film-transcript"><summary>Read the transcript</summary><ol id="filmTranscript"></ol></details>
         </figure>
