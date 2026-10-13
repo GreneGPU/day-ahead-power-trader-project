@@ -451,9 +451,17 @@
   }
 
   // ---- Risk & execution metrics over the chart window ----
+  // P&L per complete day of a run: Prop days end at the daily close, battery days are full UTC dates.
+  function dailyPnl(run) {
+    const daily=[];let day=0;
+    if(!isBattery(run)){for(const row of run.intervals){day+=row.Cashflow||0;if(row.Is_Day_End){daily.push(day);day=0;}}return daily;}
+    const dates=new Map();
+    for(const row of run.intervals){const date=row.HourUTC.slice(0,10),entry=dates.get(date)||[0,0];entry[0]+=row.Cashflow||0;entry[1]++;dates.set(date,entry);}
+    return [...dates.values()].filter(([,count])=>count===96).map(([total])=>total);
+  }
   function renderRisk(rows,label) {
-    let wins=0,active=0,gains=0,losses=0,turnover=0,gross=0,costs=0,previous=0,day=0;
-    const daily=[],hours=new Map();
+    let wins=0,active=0,gains=0,losses=0,turnover=0,gross=0,costs=0,previous=0;
+    const hours=new Map();
     for(const row of rows){
       const cash=row.Cashflow||0,cost=row.Transaction_Cost||0,exposure=row.Position_MWh||0,dayEnd=Boolean(row.Is_Day_End);
       if(direction(row)){active++;if(cash>0)wins++;}
@@ -462,14 +470,14 @@
       else{turnover+=Math.abs(exposure-previous)+(dayEnd?Math.abs(exposure):0);previous=dayEnd?0:exposure;}
       costs+=cost;gross+=cash+cost;
       const hour=row.HourUTC.slice(0,13);hours.set(hour,(hours.get(hour)||0)+cash);
-      day+=cash;if(dayEnd){daily.push(day);day=0;}
     }
     el('rkWin').textContent=active?`${format(wins/active*100)}%`:'—';
     el('rkPf').textContent=losses>0?format(gains/losses):'—';
-    // Sharpe only over complete days; with few days it is a rough indication.
-    const sd=stdev(daily),mean=daily.reduce((a,b)=>a+b,0)/Math.max(1,daily.length);
+    // Sharpe always covers the run's whole test period, not the chart window or the replay position: a
+    // week of daily values is too few for a stable ratio.
+    const daily=dailyPnl(result),sd=stdev(daily),mean=daily.reduce((a,b)=>a+b,0)/Math.max(1,daily.length);
     el('rkSharpe').textContent=daily.length>=3&&sd>0?format(mean/sd*Math.sqrt(365)):'—';
-    el('rkSharpeNote').textContent=daily.length>=3?`From ${daily.length} daily P&L values · ${label.toLowerCase()}`:'Needs at least 3 complete days in the window';
+    el('rkSharpeNote').textContent=daily.length>=3?`Whole test period · ${daily.length} daily P&L values`:'Needs at least 3 complete days in the test';
     const hourly=[...hours.values()].sort((a,b)=>a-b),tail=Math.max(1,Math.ceil(hourly.length*.05));
     el('rkVar').textContent=hourly.length>=20?`${format(Math.max(0,-hourly[Math.floor(.05*(hourly.length-1))]))} / ${format(Math.max(0,-hourly.slice(0,tail).reduce((a,b)=>a+b,0)/tail))}`:'—';
     const rate=result.settings.prop?.transaction_cost_dkk_per_mwh??0,breakeven=turnover>0?gross/turnover:null;
